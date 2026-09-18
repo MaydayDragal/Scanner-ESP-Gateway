@@ -42,6 +42,10 @@ idf.py -p COM3 flash
 
 Run `tests/usb_msc_smoke.ps1` on Windows to check that the USB disk enumerates.
 
+To check the scanner's Wi-Fi Direct network and candidate scan services from a Windows computer, run `tools/probe_es60w.ps1` with its SSID and password as parameters. The script first confirms the SSID is visible, then temporarily joins it, probes common scanner ports and eSCL endpoints, reconnects the previous Wi-Fi network, and removes the temporary scanner profile. Do not save the password in this repository.
+
+The scanner protocol gate is unresolved: the scanner's AP light is on, but this computer has not seen its SSID in a Wi-Fi scan. Windows reports that the specific network is unavailable. A scan protocol and image format must be verified on the actual scanner before capture firmware is implemented.
+
 After flashing this USB device firmware, the board's original USB Serial/JTAG COM port may disappear while the application runs. To flash again, hold **BOOT**, tap **RESET**, release **BOOT**, then use the new COM port in `idf.py -p PORT flash`.
 
 ## References
