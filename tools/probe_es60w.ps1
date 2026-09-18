@@ -9,10 +9,16 @@ $profilePath = Join-Path $env:TEMP ("es60w-" + [guid]::NewGuid().ToString('N') +
 $originalSsid = ((& netsh wlan show interfaces) | Select-String '^\s*SSID\s*:\s*(.+)$' | Select-Object -First 1).Matches.Groups[1].Value.Trim()
 if (-not $originalSsid) { throw 'Wi-Fi is not connected; cannot restore its original network.' }
 
-$visible = (& netsh wlan show networks mode=bssid) | Select-String ('^SSID\s+\d+\s*:\s*' + [regex]::Escape($ScannerSsid) + '\s*$')
-if (-not $visible) { throw "Scanner SSID '$ScannerSsid' is not visible to this computer." }
-
 try {
+    $null = & netsh wlan disconnect "interface=$interfaceName"
+    $visible = $false
+    for ($scan = 0; $scan -lt 15; $scan++) {
+        Start-Sleep -Seconds 2
+        $visible = [bool]((& netsh wlan show networks mode=bssid) | Select-String ('^SSID\s+\d+\s*:\s*' + [regex]::Escape($ScannerSsid) + '\s*$'))
+        if ($visible) { break }
+    }
+    if (-not $visible) { throw "Scanner SSID '$ScannerSsid' is not visible to this computer." }
+
     $ssidXml = [System.Security.SecurityElement]::Escape($ScannerSsid)
     $passwordXml = [System.Security.SecurityElement]::Escape($ScannerPassword)
     $xml = @"
@@ -29,8 +35,8 @@ try {
 </WLANProfile>
 "@
     [IO.File]::WriteAllText($profilePath, $xml, [Text.Encoding]::UTF8)
-    $null = & netsh wlan add profile "filename=$profilePath" user=current
-    if ($LASTEXITCODE -ne 0) { throw 'Could not add scanner Wi-Fi profile.' }
+    $addResult = & netsh wlan add profile "filename=$profilePath" user=current
+    if ($LASTEXITCODE -ne 0) { throw "Could not add scanner Wi-Fi profile: $($addResult -join ' ')" }
     Remove-Item -LiteralPath $profilePath -Force
 
     $null = & netsh wlan connect "name=$ScannerSsid" "ssid=$ScannerSsid" "interface=$interfaceName"
