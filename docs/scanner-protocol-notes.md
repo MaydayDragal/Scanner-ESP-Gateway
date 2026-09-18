@@ -10,6 +10,43 @@ These observations were made with an ES-60W in Wi-Fi Direct mode. They are evide
 
 The Windows computer's Wi-Fi scan did not reliably show the scanner while associated with a 5 GHz network. Disconnecting it temporarily and scanning again revealed the scanner SSID. The probe script restores the original network and removes its temporary scanner profile.
 
+## Dedicated scanner adapter (2026-09-18)
+
+The Windows PC now has a TP-Link Wireless USB Adapter named `Wi-Fi 2`. Its scanner profile is set to connect automatically, its preferred band is 2.4 GHz, and its IPv4 and IPv6 interface metrics are 500. The built-in `Wi-Fi` adapter retains the internet connection. `Find-NetRoute` verified that `192.168.223.1` uses `Wi-Fi 2`, while internet traffic uses `Wi-Fi`. A scanner TCP connection and an HTTPS request to GitHub both succeeded with both adapters connected.
+
+For subsequent PC debugging, target `interface=Wi-Fi 2` explicitly. Do not run the original single-adapter probe script: it disconnects the built-in adapter. The ESP was unplugged for this test; simultaneous PC/ESP scanner access has not been verified.
+
+## Confirmed command initialization and capabilities (2026-09-18)
+
+The sequence IS job lock (`0x2100`), passthrough `FS X` (`1C 58`, one-byte ACK), then `INFO`, `CAPA`, and `RESA` succeeded. `FIN ` followed by IS job unlock (`0x2101`) released the capability-query session, and a subsequent session opened successfully.
+
+The device reported:
+
+- Model ES-60W, firmware ADF 1.20.
+- Color mode `C024` (24-bit RGB).
+- Main and sub-scan resolutions 200, 300, 400, and 600 dpi.
+- Transfer format `JPG ` only; JPEG quality range 1–100.
+
+`PARA` accepted 600 dpi in both axes, `C024`, and JPEG quality 100. `TRDT` began a scan. A passthrough write with zero expected response can return an empty IS frame that must be consumed before the command reply. The first image header announced 262,144 bytes despite a requested 65,536-byte transfer buffer. Its JPEG header recorded 600 dpi. The first transfer test stopped at the reader's smaller buffer limit; complete image capture is still pending. A subsequent session received NAK for `FS X`, so recovery from an interrupted image transfer also needs implementation and testing.
+
+The ESP implementation should stream image blocks to SD in smaller chunks rather than allocating an entire announced block. JPEG quality 100 remains lossy; wrapping or decoding it as TIFF/PDF cannot recover detail absent from the scanner's network output.
+
+The next PC transfer received 30,408,704 JPEG bytes at 5100 × 8400 pixels, with 600 dpi metadata, before a disconnect. Pillow rejected the partial image as truncated and no JPEG end marker was present. Windows logged WLAN AutoConfig event 4003 (limited-connectivity automatic recovery), followed by TP-Link disconnection event 8003 at the same timestamp. Thus this attempt also exposed a PC Wi-Fi interruption, not a completed scan. Temporarily disabling autoconfiguration on `Wi-Fi 2` preserved its existing connection in a check; re-enable it before reconnecting or restarting the scanner. Its effectiveness during a full scan is still pending verification.
+
+## Successful PC scan (2026-09-18)
+
+Disabling autoconfiguration did not prevent a subsequent interruption. Disabling IPv6 on the dongle also did not resolve the connection problem; IPv6 and autoconfiguration were restored. Windows subsequently logged a temporary-disconnect request. The previously unset DWORD `fMinimizeConnections` was set to `0` under `HKLM\SOFTWARE\Policies\Microsoft\Windows\WcmSvc\GroupPolicy` to permit simultaneous connections. This is a machine-wide setting; remove that value to restore the previous default. See [Microsoft's connection-manager policy documentation](https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-admx-wcm).
+
+After this change, a complete scan succeeded while the built-in adapter retained internet access:
+
+- Requested 600 × 600 dpi, 24-bit RGB, JPEG quality 100, 5100 × 8400 pixel acquisition area, and 262,144-byte blocks.
+- Received 45,846,054 bytes, a JPEG end marker, and `#peni0005100i0006648#lftd000` from the scanner.
+- Pillow decoded the entire JPEG successfully: RGB, 5100 × 8400 pixels, 600 dpi metadata. Both quantization tables contained only ones.
+- The image canvas retains the requested height of 8400 pixels, while the scanner's page-end token reports 6648 pixels. Automatic page cropping remains future work.
+- `FIN ` completed successfully, job unlock was sent, and a subsequent capability-query session completed. An HTTPS request through the internet connection also succeeded.
+
+The test image and diagnostic script remain in ignored `backups/`. This verifies PC-to-scanner transfer; the current ESP firmware still only connects, writes its boot report, and exposes SD over USB. Porting the working scan sequence to the ESP and validating SD storage are pending.
+
 ## Source references
 
 - [Epson's documented network scan service on TCP/1865](https://files.support.epson.com/docid/cpd6/cpd60230.pdf)
