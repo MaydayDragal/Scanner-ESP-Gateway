@@ -1,9 +1,12 @@
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "esp_check.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
+#include "lwip/inet.h"
 #include "sdmmc_cmd.h"
+#include "scanner_wifi.h"
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
 #include "tinyusb_msc.h"
@@ -74,15 +77,40 @@ void app_main(void)
     sdmmc_card_print_info(stdout, &card);
 
     tinyusb_msc_storage_config_t storage_config = {
-        .mount_point = TINYUSB_MSC_STORAGE_MOUNT_USB,
+        .mount_point = TINYUSB_MSC_STORAGE_MOUNT_APP,
         .medium.card = &card,
         .fat_fs = {
-            .base_path = NULL,
+            .base_path = "/sdcard",
             .config.max_files = 5,
+            .do_not_format = true,
             .format_flags = 0,
         },
     };
     ESP_ERROR_CHECK(tinyusb_msc_new_storage_sdmmc(&storage_config, &storage));
+
+    scanner_wifi_result_t scanner = scanner_wifi_start_and_probe();
+    FILE *status = fopen("/sdcard/GATEWAY.TXT", "w");
+    if (status) {
+        ip4_addr_t gateway = { .addr = scanner.gateway_ip };
+        fprintf(status, "Scanner ESP Gateway\n");
+        fprintf(status, "Wi-Fi configured: %s\n", scanner.configured ? "yes" : "no");
+        fprintf(status, "Wi-Fi connected: %s\n", scanner.connected ? "yes" : "no");
+        fprintf(status, "Scanner TCP/1865: %s\n", scanner.scanner_port_open ? "open" : "unavailable");
+        if (scanner.gateway_ip) {
+            fprintf(status, "Scanner gateway: %s\n", ip4addr_ntoa(&gateway));
+        }
+        if (scanner.welcome_length) {
+            fprintf(status, "IS welcome:");
+            for (size_t i = 0; i < scanner.welcome_length; ++i) {
+                fprintf(status, " %02X", scanner.welcome[i]);
+            }
+            fprintf(status, "\n");
+        }
+        fclose(status);
+    } else {
+        ESP_LOGE(TAG, "could not write /sdcard/GATEWAY.TXT");
+    }
+    ESP_ERROR_CHECK(tinyusb_msc_set_storage_mount_point(storage, TINYUSB_MSC_STORAGE_MOUNT_USB));
 
     tinyusb_config_t usb_config = TINYUSB_DEFAULT_CONFIG();
     usb_config.descriptor.device = &device_descriptor;

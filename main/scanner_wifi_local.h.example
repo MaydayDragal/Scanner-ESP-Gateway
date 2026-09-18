@@ -1,0 +1,6 @@
+#pragma once
+
+// Copy to scanner_wifi_local.h and fill in the scanner's Wi-Fi Direct label.
+// The local file is ignored by Git. Do not commit its password.
+#define SCANNER_WIFI_SSID "DIRECT-xx-EPSON-xxxxxx"
+#define SCANNER_WIFI_PASSWORD "replace-with-label-password"

@@ -31,7 +31,9 @@ The ESP and the computer must not write or mount the same FAT volume simultaneou
 
 ## Current prototype
 
-`main/main.c` is the first board milestone: it initializes the original USB-A board's four-bit microSD connection and exposes the card to the computer using TinyUSB mass storage. It does not scan yet. This prototype gives the computer write access to the card; the planned ownership handoff and read-only host behavior are still to be implemented. It does not format the card.
+`main/main.c` initializes the original USB-A board's four-bit microSD connection. The ESP now joins the scanner's Wi-Fi Direct network, checks TCP/1865, writes a boot report to `GATEWAY.TXT` on the card, and then exposes the card to the computer using TinyUSB mass storage. This was verified on the actual board: the report showed a Wi-Fi connection and an open TCP/1865 service, and Windows mounted the FAT32 card. It does not scan yet. This prototype gives the computer write access to the card; the scan-time ownership handoff and read-only host behavior are still to be implemented. It does not format the card.
+
+Before building Wi-Fi support, copy `main/scanner_wifi_local.h.example` to `main/scanner_wifi_local.h` and enter the SSID and password printed on the scanner's label. The local file is ignored by Git. A build without it still works as a USB drive and reports Wi-Fi as unconfigured. The ESP stores the Wi-Fi configuration in RAM while running; the built firmware image contains the credentials and should be treated as private.
 
 Build and flash with ESP-IDF v5.5.5:
 

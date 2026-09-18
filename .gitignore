@@ -5,3 +5,4 @@ managed_components/
 eim_config.toml
 *.log
 backups/
+main/scanner_wifi_local.h
