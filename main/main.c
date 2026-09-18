@@ -1,12 +1,15 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <inttypes.h>
 
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "driver/gpio.h"
 #include "lwip/inet.h"
 #include "sdmmc_cmd.h"
 #include "scanner_wifi.h"
+#include "scanner_capture.h"
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
 #include "tinyusb_msc.h"
@@ -14,6 +17,20 @@
 static const char *TAG = "scanner_gateway";
 static sdmmc_card_t card;
 static tinyusb_msc_storage_handle_t storage;
+static bool storage_unmounted;
+
+bool tud_msc_is_writable_cb(uint8_t lun)
+{
+    (void)lun;
+    return false;
+}
+
+static void storage_event(tinyusb_msc_storage_handle_t handle, tinyusb_msc_event_t *event, void *arg)
+{
+    (void)handle; (void)arg;
+    if(event->id==TINYUSB_MSC_EVENT_MOUNT_COMPLETE)
+        storage_unmounted=event->mount_point==TINYUSB_MSC_STORAGE_MOUNT_USB;
+}
 
 #define MSC_DESCRIPTOR_LENGTH (TUD_CONFIG_DESC_LEN + TUD_MSC_DESC_LEN)
 
@@ -75,6 +92,11 @@ void app_main(void)
 {
     ESP_ERROR_CHECK(init_card());
     sdmmc_card_print_info(stdout, &card);
+    tinyusb_msc_driver_config_t msc_driver={
+        .user_flags.auto_mount_off=1,
+        .callback=storage_event,
+    };
+    ESP_ERROR_CHECK(tinyusb_msc_install_driver(&msc_driver));
 
     tinyusb_msc_storage_config_t storage_config = {
         .mount_point = TINYUSB_MSC_STORAGE_MOUNT_APP,
@@ -88,29 +110,36 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(tinyusb_msc_new_storage_sdmmc(&storage_config, &storage));
 
-    scanner_wifi_result_t scanner = scanner_wifi_start_and_probe();
+    scanner_wifi_result_t scanner = scanner_wifi_start();
+    scanner_capture_result_t capture={.scan.message="Scan skipped: scanner unavailable"};
+    if(scanner.connected && scanner.gateway_ip) {
+        ESP_LOGI(TAG,"Starting one 600 dpi color scan to SD");
+        capture=scanner_capture(scanner.gateway_ip);
+        ESP_LOGI(TAG,"%s (%" PRIu32 " bytes)",capture.scan.message,capture.scan.bytes);
+    }
     FILE *status = fopen("/sdcard/GATEWAY.TXT", "w");
     if (status) {
         ip4_addr_t gateway = { .addr = scanner.gateway_ip };
         fprintf(status, "Scanner ESP Gateway\n");
         fprintf(status, "Wi-Fi configured: %s\n", scanner.configured ? "yes" : "no");
         fprintf(status, "Wi-Fi connected: %s\n", scanner.connected ? "yes" : "no");
-        fprintf(status, "Scanner TCP/1865: %s\n", scanner.scanner_port_open ? "open" : "unavailable");
+        fprintf(status, "Reset reason: %d\n",(int)esp_reset_reason());
+        fprintf(status, "Scanner TCP/1865: %s\n", capture.port_open ? "open" : "unavailable");
+        fprintf(status, "Scan: %s\n",capture.scan.message);
+        fprintf(status, "Scan complete: %s\n",capture.scan.complete?"yes":"no");
+        fprintf(status, "Scanner released: %s\n",capture.scan.released?"yes":"no");
+        fprintf(status, "Scan file: %s\n",capture.filename);
+        fprintf(status, "Scan bytes: %" PRIu32 "\n",capture.scan.bytes);
+        fprintf(status, "Quality: 600 dpi RGB, scanner JPEG quality 100\n");
         if (scanner.gateway_ip) {
             fprintf(status, "Scanner gateway: %s\n", ip4addr_ntoa(&gateway));
-        }
-        if (scanner.welcome_length) {
-            fprintf(status, "IS welcome:");
-            for (size_t i = 0; i < scanner.welcome_length; ++i) {
-                fprintf(status, " %02X", scanner.welcome[i]);
-            }
-            fprintf(status, "\n");
         }
         fclose(status);
     } else {
         ESP_LOGE(TAG, "could not write /sdcard/GATEWAY.TXT");
     }
     ESP_ERROR_CHECK(tinyusb_msc_set_storage_mount_point(storage, TINYUSB_MSC_STORAGE_MOUNT_USB));
+    ESP_ERROR_CHECK(storage_unmounted?ESP_OK:ESP_FAIL);
 
     tinyusb_config_t usb_config = TINYUSB_DEFAULT_CONFIG();
     usb_config.descriptor.device = &device_descriptor;

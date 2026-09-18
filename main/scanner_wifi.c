@@ -42,7 +42,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
     }
 }
 
-static int connect_to_scanner(uint32_t gateway_ip)
+int scanner_wifi_open_connection(uint32_t gateway_ip)
 {
     int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (fd < 0) {
@@ -79,9 +79,15 @@ static int connect_to_scanner(uint32_t gateway_ip)
     fcntl(fd, F_SETFL, flags);
     return fd;
 }
+#else
+int scanner_wifi_open_connection(uint32_t gateway_ip)
+{
+    (void)gateway_ip;
+    return -1;
+}
 #endif
 
-scanner_wifi_result_t scanner_wifi_start_and_probe(void)
+scanner_wifi_result_t scanner_wifi_start(void)
 {
     scanner_wifi_result_t result = {0};
 #if !SCANNER_WIFI_CONFIGURED
@@ -117,6 +123,7 @@ scanner_wifi_result_t scanner_wifi_start_and_probe(void)
     strlcpy((char *)config.sta.password, SCANNER_WIFI_PASSWORD, sizeof(config.sta.password));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &config));
     ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
     ESP_LOGI(TAG, "connecting to scanner Wi-Fi Direct network");
     EventBits_t bits = xEventGroupWaitBits(wifi_events, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE,
                                           pdMS_TO_TICKS(30000));
@@ -132,20 +139,6 @@ scanner_wifi_result_t scanner_wifi_start_and_probe(void)
     if (result.gateway_ip == 0) {
         return result;
     }
-    int fd = connect_to_scanner(result.gateway_ip);
-    if (fd < 0) {
-        ESP_LOGW(TAG, "scanner TCP/1865 did not answer");
-        return result;
-    }
-    result.scanner_port_open = true;
-    struct timeval timeout = { .tv_sec = 2 };
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-    ssize_t count = recv(fd, result.welcome, sizeof(result.welcome), 0);
-    if (count > 0) {
-        result.welcome_length = (size_t)count;
-    }
-    close(fd);
-    ESP_LOGI(TAG, "scanner TCP/1865 answered");
     return result;
 #endif
 }

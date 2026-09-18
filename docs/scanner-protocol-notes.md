@@ -47,6 +47,14 @@ After this change, a complete scan succeeded while the built-in adapter retained
 
 The test image and diagnostic script remain in ignored `backups/`. This verifies PC-to-scanner transfer; the current ESP firmware still only connects, writes its boot report, and exposes SD over USB. Porting the working scan sequence to the ESP and validating SD storage are pending.
 
+## Verified ESP-to-SD capture (2026-09-18)
+
+The firmware now uses a single scanner TCP session after Wi-Fi association. It requests the same proven settings, receives each scanner block in 4096-byte pieces, checkpoints the file every MiB, and requires both page/job completion plus JPEG boundary markers before flushing, closing, and renaming TMP to JPG. An SD write failure drains the current network frame before attempting CAN/FIN/unlock; a host regression test covers this cleanup.
+
+Hardware result: `SCAN0005.JPG`, 45,249,927 bytes, scanner session released successfully. The lowest logged main-task stack headroom during capture was 848 bytes. The USB drive appeared after capture; Windows reported it read-only. A copy made through USB passed full Pillow decoding at 5100 × 8400 pixels, RGB, 600 dpi, with all-one JPEG quantization tables. This verifies scanner → ESP Wi-Fi → microSD → USB → PC for one page.
+
+Earlier interrupted attempts remain as TMP files. This milestone starts one scan per boot, keeps USB unavailable during capture, and does not yet implement automatic page cropping or repeated scans without resetting. Physical card-full and interrupted-power tests remain outstanding; mocked transfer/write failures are covered in the portable C tests.
+
 ## Source references
 
 - [Epson's documented network scan service on TCP/1865](https://files.support.epson.com/docid/cpd6/cpd60230.pdf)
