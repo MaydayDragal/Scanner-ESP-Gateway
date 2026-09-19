@@ -11,4 +11,5 @@ typedef struct {
 } scanner_wifi_result_t;
 
 scanner_wifi_result_t scanner_wifi_start(void);
+scanner_wifi_result_t scanner_wifi_current(void);
 int scanner_wifi_open_connection(uint32_t gateway_ip);

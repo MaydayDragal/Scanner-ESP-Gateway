@@ -1,69 +1,84 @@
 # Scanner ESP Gateway
 
-Firmware for a Waveshare ESP32-S3 1.47-inch display board to collect scans from an Epson WorkForce ES-60W, save them to microSD, and present completed scans to a computer as a USB mass-storage drive.
+Firmware for a Waveshare ESP32-S3 1.47-inch display board that collects scans from an Epson WorkForce ES-60W, saves them to microSD, and presents the card to Windows as a writable USB mass-storage drive while idle.
 
-## Intended connection
+## Active connection
 
 ```text
-ES-60W -- Wi-Fi Direct --> ESP32-S3 -- microSD --> USB mass storage --> computer
+ES-60W -- Wi-Fi Direct --> ESP32-S3 -- microSD --> USB MSC --> Windows
 ```
 
-The board has one USB data connection. Scanner control uses the ES-60W's verified ESC/I-2 protocol over Wi-Fi Direct, leaving USB available for the computer.
+The board has one USB data connection. Scanner control uses the ES-60W's verified ESC/I-2 protocol over Wi-Fi Direct, leaving USB available for mass storage.
 
-## Quality target
+## Automatic scan cycle and storage ownership
 
-- Request 600 dpi optical resolution and 24-bit color.
-- Preserve lossless scanner output if available; otherwise save the scanner's original stream without adding another lossy encode.
-- Stream scan data to the card because a full-resolution page can exceed available RAM.
-- Use a temporary filename until a scan is complete and verified.
+The microSD FAT volume has one owner at a time. While idle, Windows owns it through writable USB MSC and can add, edit, rename, or delete files. When the feeder detects a new page, the firmware disconnects the USB drive, mounts the card only on the ESP, captures and closes the scan, unmounts the card, and reconnects the drive to Windows.
 
-## Storage ownership
+The drive disappears during every scan and reappears afterward. Finish Windows file operations and close open files before inserting a page; a write in progress is interrupted when the drive disconnects and may leave an incomplete file or filesystem changes. The firmware never formats the card. Files already on the card remain unless Windows deletes or changes them.
 
-The ESP and the computer must not mount the same FAT volume simultaneously. This prototype scans before starting USB. After closing the scan and status files, it unmounts the card and exposes a read-only USB drive. It makes no further filesystem writes while USB is active. Automatic remounting on USB disconnect is disabled.
+After reconnecting, firmware waits up to five seconds for USB host configuration before completing the handoff. If no host is detected, it completes local USB ownership and keeps MSC ready for a later connection; the log reports that the host is unconfigured. Host configuration does not prove Windows has finished mounting the volume.
 
-## First milestones
+Successful scans use the next available `SCANnnnn.JPG` name. An interrupted capture remains as a `.TMP` file and does not count as a completed scan. Insert successive pages without resetting the ESP. After a failed scan, remove the page briefly before reloading it. Keep the scanner charging because low-battery status is recognized alongside paper status.
 
-1. Confirm the exact board revision and microSD wiring.
-2. Connect to the ES-60W in Wi-Fi Direct mode and identify a scan control protocol and image format.
-3. Bring up the board, microSD, and USB mass storage using ESP-IDF.
-4. Implement streaming scan capture and safe USB drive handoff.
-5. Verify 600 dpi output, file integrity, interrupted scans, and card-full behavior on the actual hardware.
+## Scan settings and interface
 
-## Current prototype
+Current settings are **300 dpi RGB, scanner JPEG quality 75**, using a 2550 x 4200 acquisition canvas. The scanner's original JPEG bytes are received and saved in **16 KiB chunks** without another encode. Before publishing each JPG, the ESP crops the page height to the encoded row boundary and removes a broad dark area at the right of narrow pages. The right-edge crop copies retained compressed JPEG data without recompressing it. If validation fails, the scan stays as a `.TMP` file for inspection.
 
-The firmware initializes the original USB-A board's four-bit microSD connection, joins the scanner's Wi-Fi Direct network, and attempts one scan at startup. It requests 600 dpi RGB at scanner JPEG quality 100, streams image data through a 4 KB RAM buffer, and writes `SCAN0001.TMP` (then the next unused number). A complete transfer requires page-end and job-end tokens plus JPEG start/end markers. The file becomes `.JPG` only after flushing and closing it. Failures retain `.TMP` and are recorded in `GATEWAY.TXT`. The card is never formatted by the firmware.
+The onboard 320 x 172 landscape display shows scanner connection, feeder and low-battery status, the current action, received MiB during capture, the last saved filename, size, duration, and the active scan settings. Display initialization or transfer failure is logged and scanning continues headless.
 
-The full ESP path was verified on 2026-09-18: the board captured `SCAN0005.JPG` (45,249,927 bytes) to microSD, reported successful scanner release, and exposed the card as read-only USB storage. The file was copied through USB and fully decoded on the PC as 5100 × 8400 RGB with 600 dpi metadata and quality-100 quantization tables. The IDF build, host protocol tests, and USB enumeration check passed. Actual card-full and power-loss recovery remain to be tested on hardware; protocol tests simulate write failure and truncated transfers.
+The onboard RGB status LED mirrors the same state: white while starting, yellow while reconnecting or unavailable, green while ready, cyan when paper is detected, blue while scanning, bright green after completion, red after failure, and orange for a low-battery warning. This board uses RGB wire order; the green ready state was verified on the device. LED failure does not stop the gateway.
 
-### Use this milestone
+## Verification
 
-1. Power the scanner in Wi-Fi Direct mode and load one page. Disconnect other scanner clients during the ESP test.
-2. Plug in or reset the ESP. It attempts one scan before the USB drive appears. Leave it powered while scanning; the transfer deadline is six minutes, with bounded network timeouts.
-3. When the read-only drive appears, open `GATEWAY.TXT` and copy the completed `.JPG` to the computer. `.TMP` files are incomplete and are never presented as successful scans.
-4. Safely eject the drive before resetting the ESP for another page. To remove files from the read-only drive, use the SD card in a separate reader.
+- Host protocol, storage lifecycle, and image-dimension tests: `powershell -ExecutionPolicy Bypass -File tests/run_protocol_tests.ps1 -Python <python.exe>` (requires ziglang and Pillow).
+- USB MSC hardware check: `powershell -ExecutionPolicy Bypass -File tests/usb_msc_smoke.ps1`.
+- Image validation: `python tests/verify_scan.py image.JPG` (requires Pillow; defaults to 300 dpi and quality 75; use `--dpi 600 --quality 50` for the previous setting).
 
-This first milestone uses an 8.5 × 14 inch acquisition canvas. The scanner may report a shorter actual page height; automatic cropping, long documents, multi-page jobs, and a scan button while USB remains connected are not implemented. JPEG quality 100 is still lossy, but the original scanner bytes are preserved without another encode. The firmware checks transfer completion and JPEG boundary markers; full decoding is part of the PC acceptance test.
+Hardware verification on 2026-09-18 passed: Windows enumerated the device as a writable local FAT32 USB disk at `S:`. File creation, readback, rename, and deletion passed. A host-written file survived a full scan handoff unchanged. The previous 600 dpi quality-50 setting produced fully decoded narrow and full-width scans with automatic width selection. See [protocol notes](docs/scanner-protocol-notes.md) for filenames and timings.
 
-Before building Wi-Fi support, copy `main/scanner_wifi_local.h.example` to `main/scanner_wifi_local.h` and enter the SSID and password printed on the scanner's label. The local file is ignored by Git. A build without it still works as a USB drive and reports Wi-Fi as unconfigured. The ESP stores the Wi-Fi configuration in RAM while running; the built firmware image contains the credentials and should be treated as private.
+## Build and flash
 
-Build and flash with ESP-IDF v5.5.5:
+Copy `main/scanner_wifi_local.h.example` to ignored `main/scanner_wifi_local.h` and enter the SSID and password printed on the scanner label. Firmware binaries contain these credentials and must remain private.
+
+To timestamp new scans, add `TIME_WIFI_SSID` and `TIME_WIFI_PASSWORD` for a 2.4 GHz home network to that ignored header. At startup the ESP briefly connects to home Wi-Fi, synchronizes Internet time, then reconnects to the scanner. FAT file dates use Eastern time with daylight saving. `GATEWAY.TXT` reports whether the clock was set. Existing files keep their original timestamps.
+
+Build using ESP-IDF v5.5.5:
 
 ```powershell
-idf.py build
-idf.py -p COM3 flash
+eim run 'idf.py build' v5.5.5
 ```
 
-Run `tests/usb_msc_smoke.ps1` on Windows to check that the USB disk enumerates.
+Flash the board on COM3:
 
-To check the scanner's Wi-Fi Direct network and candidate scan services from a Windows computer, run `tools/probe_es60w.ps1` with its SSID and password as parameters. The script first confirms the SSID is visible, then temporarily joins it, probes common scanner ports and eSCL endpoints, reconnects the previous Wi-Fi network, and removes the temporary scanner profile. Do not save the password in this repository.
+```powershell
+eim run 'idf.py -p COM3 flash' v5.5.5
+```
 
-For the current two-adapter PC setup, use the TP-Link `Wi-Fi 2` interface explicitly. Do not use the older single-adapter probe script during debugging because it disconnects the built-in adapter. See [protocol and network notes](docs/scanner-protocol-notes.md) for the confirmed scan sequence and Windows connection settings.
+To enter download mode, hold BOOT, tap RESET, then release BOOT. After flashing, this board may need one RESET tap without BOOT. The running application enumerates as a USB mass-storage device rather than a flashing serial port.
 
-Run the portable C protocol tests using `tests/run_protocol_tests.ps1 -Python <python.exe>`. That Python environment needs `ziglang` installed (`python -m pip install ziglang`). The tests exercise fragmented TCP reads/writes, empty frames, 256 KB image blocks, malformed/truncated responses, missing completion markers, and simulated SD write failure.
+## Windows migration from WebDAV
 
-Validate a copied hardware scan with `python tests/verify_scan.py path/to/SCAN0001.JPG` (requires Pillow). This fully decodes the file and checks color mode, dimensions, resolution metadata, and quality tables.
+After flashing the USB MSC firmware and letting the drive enumerate, preview the migration:
 
-After flashing this USB device firmware, the board's original USB Serial/JTAG COM port may disappear while the application runs. To flash again, hold **BOOT**, tap **RESET**, release **BOOT**, then use the new COM port in `idf.py -p PORT flash`.
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/migrate_to_usb_msc.ps1 -DriveLetter S -WhatIf
+```
+
+Mapped drives can be hidden across Windows UAC sessions. From the PowerShell session that shares drive mappings with Explorer, prepare the user session and approve removal of the exact legacy `S:` mapping. Use an unelevated session when UAC is enabled; when UAC is disabled, the same administrator session can run both steps:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/migrate_to_usb_msc.ps1 -DriveLetter S -PrepareUserSession
+```
+
+Within ten minutes, run the administrative migration from an elevated PowerShell session and approve its prompts:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/migrate_to_usb_msc.ps1 -DriveLetter S
+```
+
+The preparation step removes `S:` only when it is the legacy `\\192.168.77.1@80\DavWWWRoot` mapping. The administrative step requires proof that the Explorer session was prepared, restores the backed-up `FileSizeLimitInBytes` value without stopping WebClient, and assigns `S:` to the USB device with VID `303A` and PID `4002`. The script refuses to replace any other mapping or local volume. Re-run the preparation step before a later migration attempt. A different target letter still cleans up only the legacy `S:` mapping.
+
+Earlier scanner, MSC, NCM, and WebDAV experiments and their measured hardware results remain in [protocol notes](docs/scanner-protocol-notes.md). On the debug PC, scanner probes must target TP-Link Wi-Fi 2; the older single-adapter probe script interrupts the internet adapter.
 
 ## References
 

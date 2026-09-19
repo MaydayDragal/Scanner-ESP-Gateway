@@ -1,4 +1,5 @@
 #include "esci_scan.h"
+#include "scanner_settings.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,8 +7,8 @@
 typedef struct {
     const esci_io_t *io;
     esci_result_t result;
-    bool aligned, locked, fsx, scanning;
-    unsigned char buffer[4096];
+    bool aligned, locked, fsx, scanning, ready;
+    unsigned char buffer[16384];
     unsigned char first[2], last[2];
 } session_t;
 
@@ -93,6 +94,7 @@ static bool command(session_t *s, const char *cmd, const char *payload)
     if(!send_frame(s,0x2000,request,12,n?0:64)) return false;
     if(n && !send_frame(s,0x2000,payload,n,64)) return false;
     if(!reply_header(s,cmd,h,&more)) return false;
+    s->ready=strstr(h+12,"#nrdNONE")!=NULL;
     if(more>=sizeof(s->buffer)) return fail(s,"Capability data exceeds size limit");
     if(more) {
         if(!send_frame(s,0x2000,NULL,0,more)||!fixed_reply(s,0xa000,s->buffer,more)) return false;
@@ -127,7 +129,7 @@ static bool image_block(session_t *s, uint32_t n)
     return !disk_failed;
 }
 
-static bool run(session_t *s)
+static bool begin(session_t *s)
 {
     uint32_t n; unsigned char welcome[32], ack;
     if(!frame_length(s,0x8000,&n)) return false;
@@ -142,12 +144,48 @@ static bool run(session_t *s)
     if(!send_frame(s,0x2000,"\x1cX",2,1)||!fixed_reply(s,0xa000,&ack,1)) return false;
     if(ack!=6) return fail(s,"Scanner initialization rejected; restart scanner");
     s->fsx=true;
+    return true;
+}
+
+static bool page_end_dimensions(session_t *s, const char *token)
+{
+    if (strlen(token)<20 || strncmp(token,"#peni",5))
+        return fail(s,"Invalid page-end dimensions");
+    uint32_t values[2]={0};
+    for(unsigned field=0;field<2;field++) {
+        const char *digits=token+5+field*8;
+        if(field && digits[-1]!='i') return fail(s,"Invalid page-end dimensions");
+        for(unsigned i=0;i<7;i++) {
+            if(digits[i]<'0'||digits[i]>'9') return fail(s,"Invalid page-end dimensions");
+            values[field]=values[field]*10+(unsigned)(digits[i]-'0');
+        }
+    }
+    if(values[0]==0||values[0]>SCANNER_CANVAS_WIDTH||values[1]==0||values[1]>SCANNER_CANVAS_HEIGHT) {
+        snprintf(s->result.message,sizeof(s->result.message),
+                 "Page-end dimensions outside scan area: %lu x %lu",
+                 (unsigned long)values[0],(unsigned long)values[1]);
+        return false;
+    }
+    s->result.page_width=(uint16_t)values[0];
+    s->result.page_height=(uint16_t)values[1];
+    return true;
+}
+
+static bool run(session_t *s)
+{
+    uint32_t n;
+    if(!begin(s)) return false;
     if(!command(s,"INFO",NULL)||!strstr((char *)s->buffer,"ES-60W")) return fail(s,"Unexpected scanner model");
     if(!command(s,"CAPA",NULL)) return false;
     if(!strstr((char *)s->buffer,"C024")||!strstr((char *)s->buffer,"#FMTLISTJPG ")||
        !strstr((char *)s->buffer,"#JPGRANGd001d100")||!strstr((char *)s->buffer,"i0000600"))
         return fail(s,"Required scan quality is not supported");
-    const char *params="#ADF#COLC024#FMTJPG #JPGd100#RSMd600#RSSd600#BSZi0262144#PAGd001#ACQi0000000i0000000i0005100i0008400";
+    char params[160];
+    int params_length=snprintf(params,sizeof(params),
+        "#ADF#COLC024#FMTJPG #JPGd%03u#RSMd%03u#RSSd%03u#BSZi0262144#PAGd001#ACQi0000000i0000000i%07ui%07u",
+        (unsigned)SCANNER_JPEG_QUALITY,(unsigned)SCANNER_DPI,(unsigned)SCANNER_DPI,
+        (unsigned)SCANNER_CANVAS_WIDTH,(unsigned)SCANNER_CANVAS_HEIGHT);
+    if(params_length<0 || (size_t)params_length>=sizeof(params)) return fail(s,"Scan settings exceed request size");
     if(!command(s,"PARA",params)||!command(s,"TRDT",NULL)) return false;
     s->scanning=true;
     bool page_end=false, job_end=false;
@@ -155,7 +193,11 @@ static bool run(session_t *s)
         char h[65];
         if(!send_frame(s,0x2000,"IMG x0000000",12,64)||!reply_header(s,"IMG ",h,&n)) return false;
         if(n&&!image_block(s,n)) return false;
-        if(strstr(h+12,"#pen")) page_end=true;
+        const char *pen=strstr(h+12,"#pen");
+        if(pen) {
+            if(!page_end_dimensions(s,pen)) return false;
+            page_end=true;
+        }
         if(strstr(h+12,"#lftd000")) {job_end=true;break;}
         if(!n) s->io->idle(s->io->context);
     }
@@ -166,18 +208,52 @@ static bool run(session_t *s)
     return true;
 }
 
-esci_result_t esci_scan(const esci_io_t *io)
+static void finish(session_t *s)
 {
-    session_t *s=calloc(1,sizeof(*s));
-    if(!s) return (esci_result_t){.message="Insufficient memory"};
-    s->io=io;
-    s->result.complete=run(s);
     bool finished=!s->fsx;
     if(s->aligned && s->fsx) {
         if(s->scanning) command(s,"CAN ",NULL);
         if(s->aligned) finished=command(s,"FIN ",NULL);
     }
     if(s->aligned&&s->locked) s->result.released=send_frame(s,0x2101,NULL,0,0)&&finished;
+}
+
+esci_status_t esci_scanner_status(const esci_io_t *io)
+{
+    session_t *s=calloc(1,sizeof(*s));
+    esci_status_t status={.paper=ESCI_PAPER_UNKNOWN};
+    if(!s) return status;
+    s->io=io;
+    if(begin(s) && command(s,"STAT",NULL) && s->ready) {
+        const char *token=(char *)s->buffer;
+        status.paper=ESCI_PAPER_LOADED;
+        status.valid=true;
+        while(*token) {
+            if(!strncmp(token,"#BATLOW ",8)) { status.battery_low=true; token+=8; }
+            else if(!strncmp(token,"#ERRADF PE  ",12)) {
+                status.paper=ESCI_PAPER_EMPTY;
+                token+=12;
+            } else { status.paper=ESCI_PAPER_UNKNOWN; status.valid=false; break; }
+        }
+    }
+    finish(s);
+    if(!s->result.released) { status.paper=ESCI_PAPER_UNKNOWN; status.valid=false; }
+    free(s);
+    return status;
+}
+
+esci_paper_t esci_paper_status(const esci_io_t *io)
+{
+    return esci_scanner_status(io).paper;
+}
+
+esci_result_t esci_scan(const esci_io_t *io)
+{
+    session_t *s=calloc(1,sizeof(*s));
+    if(!s) return (esci_result_t){.message="Insufficient memory"};
+    s->io=io;
+    s->result.complete=run(s);
+    finish(s);
     if(s->result.complete) snprintf(s->result.message,sizeof(s->result.message),"%s",s->result.released?"Scan complete":"Scan complete; scanner cleanup failed");
     esci_result_t result=s->result;
     free(s);

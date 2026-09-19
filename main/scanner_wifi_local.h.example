@@ -4,3 +4,8 @@
 // The local file is ignored by Git. Do not commit its password.
 #define SCANNER_WIFI_SSID "DIRECT-xx-EPSON-xxxxxx"
 #define SCANNER_WIFI_PASSWORD "replace-with-label-password"
+
+// Optional: a 2.4 GHz home network used briefly at startup to set the clock.
+// The ESP disconnects from it before connecting to the scanner.
+// #define TIME_WIFI_SSID "your-2.4GHz-network"
+// #define TIME_WIFI_PASSWORD "your-home-password"

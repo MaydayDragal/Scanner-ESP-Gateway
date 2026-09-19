@@ -4,5 +4,6 @@ sdkconfig.old
 managed_components/
 eim_config.toml
 *.log
+__pycache__/
 backups/
 main/scanner_wifi_local.h

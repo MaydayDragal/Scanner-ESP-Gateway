@@ -1,0 +1,17 @@
+#pragma once
+
+#include <stdbool.h>
+#include "esp_err.h"
+
+/* Call from the application task only. Close every /sdcard file before expose.
+ * A failed transition revokes APP access; only restore_usb may recover it.
+ */
+esp_err_t usb_storage_start_app(void);
+esp_err_t usb_storage_expose(void);
+esp_err_t usb_storage_acquire(void);
+esp_err_t usb_storage_restore_usb(void);
+bool usb_storage_app_owned(void);
+/* Expose/recovery wait up to 5 s for USB configuration. With no detected host,
+ * ESP_OK means locally ready, with MSC left running for a later connection.
+ * This getter reports host configuration, not the Windows volume-mount state. */
+bool usb_storage_host_configured(void);
