@@ -157,3 +157,7 @@ Firmware SHA-256 `6E90A4BB1910F5C0EC393EF00405CCC0AA83AB7C060913C1FCE4E3890F6D9F
 ## Display settings match scan request (2026-09-18)
 
 The display footer still contained a literal `600 DPI | RGB | JPG 50` after the scan request changed to 300 dpi and quality 75. The scan request, page-end limits, `GATEWAY.TXT`, and display footer now use constants in `scanner_settings.h`. Protocol and display-model tests passed. Firmware SHA-256 `B6F0D7C67DACE31ED5F7885492FE6C3C927E64B6FA8F05FB592AE3FBE1CEBBED` flashed on COM3 with verified hashes. After normal RESET, the user confirmed the display reads `300 DPI | RGB | JPG 75` at READY TO SCAN. `S:` returned with the correct settings and synchronized clock in `GATEWAY.TXT`.
+
+## Remove the SD status file (2026-09-19)
+
+`GATEWAY.TXT` was diagnostic output only; the firmware never read it. Its writer and boot/scan call sites were removed. After flashing the new firmware on COM3 and resetting, the existing file was deleted from `S:` in File Explorer. A new scan saved `SCAN0014.JPG` (847,210 bytes), fully decoded at 1680 x 2528 RGB, 300 dpi, quality 75, with a 9/19/2026 12:05:02 AM file timestamp. `GATEWAY.TXT` remained absent after the scan.

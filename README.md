@@ -40,7 +40,7 @@ Hardware verification on 2026-09-18 passed: Windows enumerated the device as a w
 
 Copy `main/scanner_wifi_local.h.example` to ignored `main/scanner_wifi_local.h` and enter the SSID and password printed on the scanner label. Firmware binaries contain these credentials and must remain private.
 
-To timestamp new scans, add `TIME_WIFI_SSID` and `TIME_WIFI_PASSWORD` for a 2.4 GHz home network to that ignored header. At startup the ESP briefly connects to home Wi-Fi, synchronizes Internet time, then reconnects to the scanner. FAT file dates use Eastern time with daylight saving. `GATEWAY.TXT` reports whether the clock was set. Existing files keep their original timestamps.
+To timestamp new scans, add `TIME_WIFI_SSID` and `TIME_WIFI_PASSWORD` for a 2.4 GHz home network to that ignored header. At startup the ESP briefly connects to home Wi-Fi, synchronizes Internet time, then reconnects to the scanner. FAT file dates use Eastern time with daylight saving. Existing files keep their original timestamps.
 
 Build using ESP-IDF v5.5.5:
 

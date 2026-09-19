@@ -1,14 +1,9 @@
-#include <stdlib.h>
 #include <stdio.h>
 #include <inttypes.h>
-#include <time.h>
 
 #include "esp_check.h"
 #include "esp_log.h"
-#include "esp_system.h"
 #include "esp_timer.h"
-#include "driver/gpio.h"
-#include "lwip/inet.h"
 #include "scanner_wifi.h"
 #include "scanner_capture.h"
 #include "page_trigger.h"
@@ -17,7 +12,6 @@
 #include "usb_storage.h"
 #include "scanner_display.h"
 #include "scanner_led.h"
-#include "scanner_settings.h"
 #include "esp_netif.h"
 #include "esp_event.h"
 
@@ -39,36 +33,6 @@ static void display_progress(void *context,uint32_t bytes)
     show_status(state);
 }
 
-static void write_status(scanner_wifi_result_t scanner, scanner_capture_result_t capture, uint32_t duration_ms)
-{
-    if (!usb_storage_app_owned()) return;
-    FILE *status = fopen("/sdcard/GATEWAY.TXT", "w");
-    if (status) {
-        ip4_addr_t gateway = { .addr = scanner.gateway_ip };
-        fprintf(status, "Scanner ESP Gateway\n");
-        fprintf(status, "Wi-Fi configured: %s\n", scanner.configured ? "yes" : "no");
-        fprintf(status, "Wi-Fi connected: %s\n", scanner.connected ? "yes" : "no");
-        fprintf(status, "Reset reason: %d\n",(int)esp_reset_reason());
-        fprintf(status, "Scanner TCP/1865: %s\n", capture.port_open ? "open" : "unavailable");
-        fprintf(status, "Scan: %s\n",capture.scan.message);
-        fprintf(status, "Scan complete: %s\n",capture.scan.complete?"yes":"no");
-        fprintf(status, "Scanner released: %s\n",capture.scan.released?"yes":"no");
-        fprintf(status, "Scan file: %s\n",capture.filename);
-        fprintf(status, "Scan bytes: %" PRIu32 "\n",capture.scan.bytes);
-        fprintf(status, "Capture duration: %" PRIu32 " ms\n",duration_ms);
-        fprintf(status, "Quality: %u dpi RGB, scanner JPEG quality %u\n",
-                (unsigned)SCANNER_DPI,(unsigned)SCANNER_JPEG_QUALITY);
-        time_t now = time(NULL);
-        fprintf(status, "Clock synchronized: %s\n", now > 1704067200 ? "yes" : "no");
-        if (scanner.gateway_ip) {
-            fprintf(status, "Scanner gateway: %s\n", ip4addr_ntoa(&gateway));
-        }
-        fclose(status);
-    } else {
-        ESP_LOGE(TAG, "could not write /sdcard/GATEWAY.TXT");
-    }
-}
-
 void app_main(void)
 {
     ESP_ERROR_CHECK(esp_netif_init());
@@ -78,12 +42,10 @@ void app_main(void)
     show_status(&display_state);
     ESP_ERROR_CHECK(usb_storage_start_app());
     scanner_wifi_result_t scanner=scanner_wifi_start();
-    scanner_capture_result_t capture={.scan.message="Waiting for paper"};
     display_state.wifi_connected=scanner.connected;
     display_state.phase=SCANNER_DISPLAY_WAITING;
     display_state.message=scanner.connected?"CHECKING SCANNER":"CONNECTING TO SCANNER";
     show_status(&display_state);
-    write_status(scanner,capture,0);
     ESP_ERROR_CHECK(usb_storage_expose());
     page_trigger_t trigger={.armed=true};
     esci_paper_t previous=ESCI_PAPER_UNKNOWN;
@@ -124,7 +86,7 @@ void app_main(void)
             continue;
         }
         int64_t started=esp_timer_get_time();
-        capture=scanner_capture(scanner.gateway_ip,display_progress,&display_state);
+        scanner_capture_result_t capture=scanner_capture(scanner.gateway_ip,display_progress,&display_state);
         uint32_t duration_ms=(uint32_t)((esp_timer_get_time()-started)/1000);
         ESP_LOGI(TAG,"%s (%" PRIu32 " bytes in %" PRIu32 " ms)",capture.scan.message,capture.scan.bytes,duration_ms);
         if(capture.scan.complete) {
@@ -136,7 +98,6 @@ void app_main(void)
         } else {
             snprintf(display_message,sizeof(display_message),"%s",capture.scan.message);
         }
-        write_status(scanner,capture,duration_ms);
         if (usb_storage_expose() != ESP_OK) {
             display_state.phase=SCANNER_DISPLAY_ERROR;
             display_state.message="USB STORAGE RESTORE FAILED";
