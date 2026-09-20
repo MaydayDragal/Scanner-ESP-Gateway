@@ -9,6 +9,7 @@ typedef struct {
     esci_result_t result;
     bool aligned, locked, fsx, scanning, ready;
     unsigned char buffer[16384];
+    size_t buffer_length;
     unsigned char first[2], last[2];
 } session_t;
 
@@ -99,6 +100,7 @@ static bool command(session_t *s, const char *cmd, const char *payload)
     if(more) {
         if(!send_frame(s,0x2000,NULL,0,more)||!fixed_reply(s,0xa000,s->buffer,more)) return false;
     }
+    s->buffer_length=more;
     s->buffer[more]=0;
     if(!memcmp(cmd,"PARA",4)&&!strstr(h+12,"#parOK  ")) return fail(s,"Scan parameters not accepted");
     return true;
@@ -225,12 +227,14 @@ esci_status_t esci_scanner_status(const esci_io_t *io)
     if(!s) return status;
     s->io=io;
     if(begin(s) && command(s,"STAT",NULL) && s->ready) {
-        const char *token=(char *)s->buffer;
+        const unsigned char *token=s->buffer;
+        const unsigned char *end=token+s->buffer_length;
         status.paper=ESCI_PAPER_LOADED;
         status.valid=true;
-        while(*token) {
-            if(!strncmp(token,"#BATLOW ",8)) { status.battery_low=true; token+=8; }
-            else if(!strncmp(token,"#ERRADF PE  ",12)) {
+        while(token<end) {
+            size_t remaining=(size_t)(end-token);
+            if(remaining>=8 && !memcmp(token,"#BATLOW ",8)) { status.battery_low=true; token+=8; }
+            else if(remaining>=12 && !memcmp(token,"#ERRADF PE  ",12)) {
                 status.paper=ESCI_PAPER_EMPTY;
                 token+=12;
             } else { status.paper=ESCI_PAPER_UNKNOWN; status.valid=false; break; }

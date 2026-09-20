@@ -8,7 +8,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Protocol test compilation failed' }
     & $binary
     if ($LASTEXITCODE -ne 0) { throw 'Protocol tests failed' }
-    & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_jpeg_crop.c') (Join-Path $root 'main\jpeg_crop.c') -o $binary
+    & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_jpeg_crop.c') (Join-Path $root 'main\jpeg_crop.c') (Join-Path $root 'main\jpeg_stream.c') -o $binary
     if ($LASTEXITCODE -ne 0) { throw 'JPEG crop test compilation failed' }
     & $binary $jpegFixture
     if ($LASTEXITCODE -ne 0) { throw 'JPEG crop tests failed' }
@@ -16,20 +16,57 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Display model test compilation failed' }
     & $binary
     if ($LASTEXITCODE -ne 0) { throw 'Display model tests failed' }
+    & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_scanner_idle_model.c') (Join-Path $root 'main\scanner_idle_model.c') -o $binary
+    if ($LASTEXITCODE -ne 0) { throw 'Idle timer test compilation failed' }
+    & $binary
+    if ($LASTEXITCODE -ne 0) { throw 'Idle timer tests failed' }
+    foreach ($clockMode in 'model', 'missing', 'configured') {
+        $clockFlags = @()
+        if ($clockMode -ne 'model') { $clockFlags += '-DSCANNER_CLOCK_WIFI_BOUNDARY_TEST' }
+        if ($clockMode -eq 'configured') { $clockFlags += '-DSCANNER_CLOCK_TEST_WITH_TIME_CREDENTIALS' }
+        & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror @clockFlags -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_scanner_clock_model.c') (Join-Path $root 'main\scanner_clock_model.c') -o $binary
+        if ($LASTEXITCODE -ne 0) { throw "Clock $clockMode test compilation failed" }
+        & $binary
+        if ($LASTEXITCODE -ne 0) { throw "Clock $clockMode tests failed" }
+    }
     & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_scanner_led_model.c') (Join-Path $root 'main\scanner_led_model.c') -o $binary
     if ($LASTEXITCODE -ne 0) { throw 'LED model test compilation failed' }
     & $binary
     if ($LASTEXITCODE -ne 0) { throw 'LED model tests failed' }
+    & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_gateway_state.c') (Join-Path $root 'main\gateway_state_model.c') (Join-Path $root 'main\gateway_diagnostics.c') (Join-Path $root 'main\scanner_display_model.c') (Join-Path $root 'main\scanner_led_model.c') -o $binary
+    if ($LASTEXITCODE -ne 0) { throw 'Gateway state test compilation failed' }
+    & $binary
+    if ($LASTEXITCODE -ne 0) { throw 'Gateway state tests failed' }
+    & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror -I (Join-Path $PSScriptRoot 'visual_stubs') -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_scanner_visual.c') (Join-Path $root 'main\scanner_display.c') (Join-Path $root 'main\scanner_led.c') (Join-Path $root 'main\scanner_display_model.c') (Join-Path $root 'main\scanner_led_model.c') (Join-Path $root 'main\scanner_idle_model.c') -o $binary
+    if ($LASTEXITCODE -ne 0) { throw 'Visual driver test compilation failed' }
+    foreach ($visualCase in 'dma', 'dma_pending', 'partial', 'led', 'retry', 'wake', 'panel', 'led_init', 'gpio_init', 'allocation', 'render_errors') {
+        & $binary $visualCase
+        if ($LASTEXITCODE -ne 0) { throw "Visual driver $visualCase tests failed" }
+    }
+    & $Python (Join-Path $PSScriptRoot 'run_led_transport_tests.py')
+    if ($LASTEXITCODE -ne 0) { throw 'LED transport tests failed' }
     & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_storage_handoff_model.c') (Join-Path $root 'main\storage_handoff_model.c') -o $binary
     if ($LASTEXITCODE -ne 0) { throw 'Storage handoff model test compilation failed' }
     & $binary
     if ($LASTEXITCODE -ne 0) { throw 'Storage handoff model tests failed' }
     & $Python (Join-Path $PSScriptRoot 'run_usb_storage_tests.py')
     if ($LASTEXITCODE -ne 0) { throw 'USB storage lifecycle tests failed' }
+    & $Python (Join-Path $PSScriptRoot 'run_storage_mode_tests.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Storage mode and BOOT input tests failed' }
+    & $Python (Join-Path $PSScriptRoot 'run_gateway_main_tests.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Gateway main-loop fault tests failed' }
     & $Python (Join-Path $PSScriptRoot 'test_verify_scan.py')
-    if ($LASTEXITCODE -ne 0) { throw 'Scan image dimension tests failed' }
+    if ($LASTEXITCODE -ne 0) { throw 'Scan image verifier tests failed' }
     & $Python (Join-Path $PSScriptRoot 'test_jpeg_width_crop.py')
     if ($LASTEXITCODE -ne 0) { throw 'JPEG width crop tests failed' }
+    & $Python (Join-Path $PSScriptRoot 'test_jpeg_pipeline.py')
+    if ($LASTEXITCODE -ne 0) { throw 'JPEG pipeline tests failed' }
+    & $Python (Join-Path $PSScriptRoot 'run_capture_tests.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Capture transaction tests failed' }
+    & $Python (Join-Path $PSScriptRoot 'test_rebase_dependencies_lock.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Dependency lock relocation tests failed' }
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'test_probe_es60w.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'Legacy scanner probe tests failed' }
 } finally {
     Remove-Item -LiteralPath $binary -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $jpegFixture -Force -ErrorAction SilentlyContinue

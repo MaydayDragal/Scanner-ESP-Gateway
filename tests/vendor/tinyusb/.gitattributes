@@ -1,0 +1,2 @@
+# Exact upstream byte snapshot; do not convert LF/CRLF during checkout.
+* -text

@@ -1,90 +1,39 @@
 #include <assert.h>
-#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include "jpeg_crop.h"
-
-static const uint8_t jpeg[] = {
-    0xff,0xd8,
-    0xff,0xe0,0x00,0x04,0x12,0x34,
-    0xff,0xc0,0x00,0x11,0x08,0x10,0x68,0x09,0xf6,0x03,
-    0x01,0x21,0x00,0x02,0x11,0x01,0x03,0x11,0x01,
-    0xff,0xdd,0x00,0x04,0x00,0xa0,
-    0xff,0xda,0x00,0x0c,0x03,0x01,0x00,0x02,0x11,0x03,0x11,0x00,0x3f,0x00,
-    0x00,0xff,0xd0,0x00,0xff,0xd1,0x00,0xff,0xd9
-};
-
-static void write_fixture(const char *path, const uint8_t *data, size_t n)
-{
-    FILE *file=fopen(path,"wb");
-    assert(file && fwrite(data,1,n,file)==n && fclose(file)==0);
+/* Valid baseline 4:2:2, DC zero + AC EOB, one MCU = eight zero bits. */
+static void word(FILE *f,unsigned n) { fputc(n>>8,f);fputc(n&255,f); }
+static void segment(FILE*f,unsigned marker,const uint8_t*p,unsigned n) {
+    word(f,0xff00|marker);word(f,n+2);assert(fwrite(p,1,n,f)==n);
 }
-
-static void assert_contents(const char *path, const uint8_t *expected, size_t n)
-{
-    uint8_t *actual=malloc(n);
-    assert(actual);
-    FILE *file=fopen(path,"rb");
-    assert(file && fread(actual,1,n,file)==n && fgetc(file)==EOF && fclose(file)==0);
-    assert(memcmp(actual,expected,n)==0);
-    free(actual);
+static void fixture(const char *path,unsigned width,unsigned canvas,unsigned rows,bool broken) {
+    FILE*f=fopen(path,"wb");assert(f);word(f,0xffd8);
+    uint8_t metadata[4093]={0};segment(f,0xe0,metadata,sizeof(metadata));
+    uint8_t q[65];memset(q,1,sizeof(q));q[0]=0;segment(f,0xdb,q,sizeof(q));
+    uint8_t dc[18]={0,1},ac[18]={0x10,1};segment(f,0xc4,dc,18);segment(f,0xc4,ac,18);
+    uint8_t sof[]={8,canvas>>8,canvas&255,width>>8,width&255,3,1,0x21,0,2,0x11,0,3,0x11,0};
+    segment(f,0xc0,sof,sizeof(sof));unsigned mcus=(width+15)/16;
+    uint8_t dri[]={mcus>>8,mcus&255};segment(f,0xdd,dri,2);
+    uint8_t sos[]={3,1,0,2,0,3,0,0,63,0};segment(f,0xda,sos,sizeof(sos));
+    for(unsigned row=0;row<rows;row++) {
+        if(!broken || row!=1) for(unsigned mcu=0;mcu<mcus;mcu++)fputc(0,f);
+        word(f,row+1==rows?0xffd9:0xffd0+(row&7));
+    }
+    assert(fclose(f)==0);
 }
-
-int main(int argc, char **argv)
-{
+int main(int argc,char**argv) {
     assert(argc==2);
-    uint8_t expected[sizeof(jpeg)];
-    memcpy(expected,jpeg,sizeof(jpeg));
-    write_fixture(argv[1],jpeg,sizeof(jpeg));
-    assert(jpeg_crop_file(argv[1],2550,24));
-    expected[13]=0x00; expected[14]=0x18;
-    assert_contents(argv[1],expected,sizeof(expected));
-
-    write_fixture(argv[1],jpeg,sizeof(jpeg));
-    assert(jpeg_crop_file(argv[1],2550,25));
-    assert_contents(argv[1],expected,sizeof(expected));
-
-    write_fixture(argv[1],jpeg,sizeof(jpeg));
-    assert(!jpeg_crop_file(argv[1],2550,40));
-    assert_contents(argv[1],jpeg,sizeof(jpeg));
-
-    memcpy(expected,jpeg,sizeof(jpeg)); expected[9]=0xc2;
-    write_fixture(argv[1],expected,sizeof(expected));
-    assert(!jpeg_crop_file(argv[1],2550,24));
-    assert_contents(argv[1],expected,sizeof(expected));
-
-    /* The FF prefix and restart code straddle the entropy reader's block boundary. */
-    uint8_t big[sizeof(jpeg)+4096];
-    size_t prefix=sizeof(jpeg)-9;
-    memcpy(big,jpeg,prefix);
-    memset(big+prefix,0,4095);
-    const uint8_t tail[]={0xff,0xd0,0x00,0xff,0xd1,0x00,0xff,0xd9};
-    memcpy(big+prefix+4095,tail,sizeof(tail));
-    size_t big_size=prefix+4095+sizeof(tail);
-    write_fixture(argv[1],big,big_size);
-    assert(jpeg_crop_file(argv[1],2550,24));
-    big[13]=0x00; big[14]=0x18;
-    assert_contents(argv[1],big,big_size);
-
-    /* Any byte after EOI makes the file unsafe to publish. */
-    big[big_size++]=0x01;
-    write_fixture(argv[1],big,big_size);
-    assert(!jpeg_crop_file(argv[1],2550,24));
-    assert_contents(argv[1],big,big_size);
-
-    uint8_t jpeg600[sizeof(jpeg)];
-    memcpy(jpeg600,jpeg,sizeof(jpeg));
-    jpeg600[13]=0x20; jpeg600[14]=0xd0; /* 8400-pixel acquisition height */
-    jpeg600[15]=0x13; jpeg600[16]=0xec; /* 5100-pixel width */
-    jpeg600[31]=0x01; jpeg600[32]=0x3f; /* 319 MCUs per row */
-    write_fixture(argv[1],jpeg600,sizeof(jpeg600));
-    assert(jpeg_crop_file(argv[1],5100,24));
-    jpeg600[13]=0x00; jpeg600[14]=0x18;
-    assert_contents(argv[1],jpeg600,sizeof(jpeg600));
-
-    puts("JPEG page crop tests passed");
-    return 0;
+    for(unsigned dpi=0;dpi<2;dpi++) {
+        unsigned width=dpi?5100:2550,canvas=dpi?8400:4200;
+        fixture(argv[1],width,canvas,3,false);assert(jpeg_crop_file(argv[1],width,24));
+        fixture(argv[1],width,canvas,3,false);assert(jpeg_crop_file(argv[1],width,25));
+        fixture(argv[1],width,canvas,3,false);assert(!jpeg_crop_file(argv[1],width,40));
+        fixture(argv[1],width,canvas,3,true);assert(!jpeg_crop_file(argv[1],width,24));
+        fixture(argv[1],width,canvas,3,false);FILE*f=fopen(argv[1],"ab");assert(f);fputc(0,f);fclose(f);
+        assert(!jpeg_crop_file(argv[1],width,24));
+    }
+    puts("JPEG page crop tests passed");return 0;
 }

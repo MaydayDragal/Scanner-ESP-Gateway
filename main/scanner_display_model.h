@@ -2,6 +2,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "esci_scan.h"
+#include "gateway_state_model.h"
+#include "scanner_clock_model.h"
 
 typedef enum {
     SCANNER_DISPLAY_STARTING,
@@ -9,6 +11,12 @@ typedef enum {
     SCANNER_DISPLAY_SCANNING,
     SCANNER_DISPLAY_COMPLETE,
     SCANNER_DISPLAY_ERROR,
+    SCANNER_DISPLAY_ACQUIRING,
+    SCANNER_DISPLAY_FINALIZING,
+    SCANNER_DISPLAY_RESTORING,
+    SCANNER_DISPLAY_MAINTENANCE,
+    SCANNER_DISPLAY_TIME_SYNC,
+    SCANNER_DISPLAY_STOPPED,
 } scanner_display_phase_t;
 
 typedef enum {
@@ -29,6 +37,8 @@ typedef struct {
     const char *last_filename;
     uint32_t last_bytes;
     uint32_t last_duration_ms;
+    const gateway_state_t *gateway;
+    const scanner_clock_state_t *clock;
 } scanner_display_state_t;
 
 typedef struct {

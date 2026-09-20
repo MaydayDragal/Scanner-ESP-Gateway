@@ -75,14 +75,18 @@ static bool save(void *ctx,const void *buf,size_t n)
     saved+=n; return true;
 }
 static void idle(void *ctx) {(void)ctx;}
-static void status_fixture(const char *payload)
+static void status_fixture_bytes(const void *payload, size_t payload_length)
 {
     length=cursor=sent=saved=0;
     frame(0x8000,"\x01\x04\0\0\0",5);
     frame(0xa100,"\x06",1); frame(0xa000,"\x06",1);
-    response("STAT","#nrdNONE#---",strlen(payload));
-    if(*payload) frame(0xa000,payload,strlen(payload));
+    response("STAT","#nrdNONE#---",payload_length);
+    if(payload_length) frame(0xa000,payload,payload_length);
     response("FIN ","#nrdNONE#---",0);
+}
+static void status_fixture(const char *payload)
+{
+    status_fixture_bytes(payload,strlen(payload));
 }
 int main(void)
 {
@@ -104,9 +108,22 @@ int main(void)
     status_fixture("#ERRADF PE  "); status=esci_scanner_status(&io); assert(status.valid && status.paper==ESCI_PAPER_EMPTY && !status.battery_low && cursor==length && saved==0);
     status_fixture(""); status=esci_scanner_status(&io); assert(status.valid && status.paper==ESCI_PAPER_LOADED && !status.battery_low && cursor==length && saved==0);
     status_fixture("#ERRADF OPN "); assert(esci_paper_status(&io)==ESCI_PAPER_UNKNOWN);
-    status_fixture("#BATLOW "); status=esci_scanner_status(&io); assert(status.paper==ESCI_PAPER_LOADED && status.battery_low);
-    status_fixture("#BATLOW #ERRADF PE  "); status=esci_scanner_status(&io); assert(status.paper==ESCI_PAPER_EMPTY && status.battery_low);
-    status_fixture("#ERRADF PE  #BATLOW "); status=esci_scanner_status(&io); assert(status.paper==ESCI_PAPER_EMPTY && status.battery_low);
+    status_fixture("#BATLOW "); status=esci_scanner_status(&io); assert(status.valid && status.paper==ESCI_PAPER_LOADED && status.battery_low);
+    status_fixture("#BATLOW #ERRADF PE  "); status=esci_scanner_status(&io); assert(status.valid && status.paper==ESCI_PAPER_EMPTY && status.battery_low);
+    status_fixture("#ERRADF PE  #BATLOW "); status=esci_scanner_status(&io); assert(status.valid && status.paper==ESCI_PAPER_EMPTY && status.battery_low);
+    const char leading_nul[]="\0#BATLOW ";
+    status_fixture_bytes(leading_nul,sizeof(leading_nul)-1);
+    status=esci_scanner_status(&io); assert(!status.valid && status.paper==ESCI_PAPER_UNKNOWN && cursor==length);
+    const char interior_nul[]="#BATLOW \0#ERRADF PE  ";
+    status_fixture_bytes(interior_nul,sizeof(interior_nul)-1);
+    status=esci_scanner_status(&io); assert(!status.valid && status.paper==ESCI_PAPER_UNKNOWN && cursor==length);
+    const char trailing_nul[]="#ERRADF PE  \0";
+    status_fixture_bytes(trailing_nul,sizeof(trailing_nul)-1);
+    status=esci_scanner_status(&io); assert(!status.valid && status.paper==ESCI_PAPER_UNKNOWN && cursor==length);
+    status_fixture("#BATLO"); status=esci_scanner_status(&io); assert(!status.valid && status.paper==ESCI_PAPER_UNKNOWN);
+    status_fixture("#ERRADF PE "); status=esci_scanner_status(&io); assert(!status.valid && status.paper==ESCI_PAPER_UNKNOWN);
+    status_fixture("#BATLOW X"); status=esci_scanner_status(&io); assert(!status.valid && status.paper==ESCI_PAPER_UNKNOWN);
+    status_fixture("#ERRADF PE  #"); status=esci_scanner_status(&io); assert(!status.valid && status.paper==ESCI_PAPER_UNKNOWN);
     status_fixture("#BATLOW #ERRADF OPN "); assert(esci_paper_status(&io)==ESCI_PAPER_UNKNOWN);
     status_fixture("#BATLOW unexpected"); assert(esci_paper_status(&io)==ESCI_PAPER_UNKNOWN);
     status_fixture("unexpected"); assert(esci_paper_status(&io)==ESCI_PAPER_UNKNOWN);
