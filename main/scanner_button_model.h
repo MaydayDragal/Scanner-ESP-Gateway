@@ -2,7 +2,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef enum { SCANNER_BUTTON_NONE, SCANNER_BUTTON_WAKE, SCANNER_BUTTON_HOLD } scanner_button_event_t;
+typedef enum { SCANNER_BUTTON_NONE, SCANNER_BUTTON_WAKE, SCANNER_BUTTON_HOLD,
+               SCANNER_BUTTON_ACK } scanner_button_event_t;
 typedef struct {
     bool initialized, raw_pressed, stable_pressed, released_at_boot;
     bool candidate, wake_only, idle_at_start, consumed;

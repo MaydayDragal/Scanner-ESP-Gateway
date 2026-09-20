@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "esci_scan.h"
 #include "gateway_state_model.h"
+#include "scanner_clock_model.h"
 
 typedef enum {
     SCANNER_DISPLAY_STARTING,
@@ -37,6 +38,7 @@ typedef struct {
     uint32_t last_bytes;
     uint32_t last_duration_ms;
     const gateway_state_t *gateway;
+    const scanner_clock_state_t *clock;
 } scanner_display_state_t;
 
 typedef struct {

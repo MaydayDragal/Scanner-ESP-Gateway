@@ -10,6 +10,18 @@
 static const char *scenario;
 static unsigned alloc_count,open_count,fopen_count,fdopen_count,close_count,flush_count,sync_count,rename_count,write_count,put_count,stat_count;
 static unsigned char incoming[1000000];static size_t length,cursor,sent;
+static bool observed_receiving, observed_finalizing;
+static void phase_observer(void *context,scanner_capture_phase_t phase) {
+    assert(context==&observed_finalizing);
+    if(phase==SCANNER_CAPTURE_RECEIVING) {
+        assert(!observed_receiving && !observed_finalizing && close_count==0 && rename_count==0);
+        observed_receiving=true;
+    } else {
+        assert(phase==SCANNER_CAPTURE_FINALIZING && observed_receiving && !observed_finalizing);
+        assert(close_count==0 && rename_count==0 && cursor==length);
+        observed_finalizing=true;
+    }
+}
 static const char *path(const char *p) { return !strncmp(p,"/sdcard/",8)?p+8:p; }
 static bool event(const char *name,unsigned count) {
     char key[64];snprintf(key,sizeof(key),"%s%u",name,count);
@@ -39,7 +51,7 @@ FILE *test_fopen(const char*p,const char*m) {
     if(!strcmp(scenario,"corrupt_crop") && strstr(p,"CROP")) { FILE*f=fopen(path(p),"r+b");assert(f);fputc(0,f);fclose(f); }
     if(event("fopen",++fopen_count))return NULL;return fopen(path(p),m); }
 int test_close(int fd) { return fd==12345?0:close(fd); }
-int test_fclose(FILE*f) { int r=fclose(f);if(event("close",++close_count))return EOF;return r; }
+int test_fclose(FILE*f) { if(!strcmp(scenario,"phase_order"))assert(observed_finalizing);int r=fclose(f);if(event("close",++close_count))return EOF;return r; }
 int test_fflush(FILE*f) { if(event("flush",++flush_count))return EOF;return fflush(f); }
 int test_fsync(int fd) { if(event("sync",++sync_count))return -1;return _commit(fd); }
 size_t test_fwrite(const void*p,size_t s,size_t n,FILE*f) {
@@ -85,14 +97,16 @@ static void fixture(const char *filename) {
 int main(int argc,char**argv) {
     assert(argc==3);scenario=argv[1];fixture(argv[2]);
     if(!strncmp(scenario,"reserve_",8))sentinel(scenario+8);
-    scanner_capture_result_t r=scanner_capture(0,NULL,NULL);
+    scanner_capture_result_t r=!strcmp(scenario,"phase_order")?
+        scanner_capture_observed(0,NULL,NULL,phase_observer,&observed_finalizing):scanner_capture(0,NULL,NULL);
+    if(!strcmp(scenario,"phase_order"))assert(observed_receiving && observed_finalizing);
     printf("%s saved=%d crop=%d stage=%d error=%d received=%u bytes=%u file=%s\n",scenario,r.file_saved,r.crop_outcome,r.failed_stage,r.error_code,r.scan.bytes,r.saved_bytes,r.filename);
-    if(!strcmp(scenario,"success") || !strcmp(scenario,"white") || !strncmp(scenario,"reserve_",8)) {
+    if(!strcmp(scenario,"success") || !strcmp(scenario,"phase_order") || !strcmp(scenario,"white") || !strncmp(scenario,"reserve_",8)) {
         assert(r.file_saved&&r.scan.complete&&r.scan.released&&r.saved_bytes==r.scan.bytes);
         struct stat size;assert(!stat(r.filename,&size)&&r.saved_bytes==(uint32_t)size.st_size);
         if(r.crop_outcome==SCANNER_CROP_SAVED)assert(!stat(r.crop_filename,&size)&&r.crop_bytes==(uint32_t)size.st_size);
         assert(r.failed_stage==SCANNER_CAPTURE_NONE&&r.error_code==0);
-        if(!strcmp(scenario,"success"))assert(r.crop_outcome==SCANNER_CROP_SAVED&&r.crop_bytes>0);
+        if(!strcmp(scenario,"success") || !strcmp(scenario,"phase_order"))assert(r.crop_outcome==SCANNER_CROP_SAVED&&r.crop_bytes>0);
         else assert(r.crop_outcome==SCANNER_CROP_NOT_NEEDED);
         if(!strncmp(scenario,"reserve_",8))assert(!strcmp(r.filename,"SCAN0002.JPG"));
     } else {

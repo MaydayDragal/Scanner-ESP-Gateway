@@ -20,7 +20,8 @@ with tempfile.TemporaryDirectory(prefix="storage-mode-test-") as directory:
         (["tests/test_scanner_button_model.c", "main/scanner_button_model.c"], [None]),
         (["tests/test_scanner_button_driver.c", "main/scanner_button.c", "main/scanner_button_model.c"],
          ["normal", "gpio_error", "queue_error", "task_error"]),
-        (["tests/test_storage_main.c", "main/scanner_button_model.c", "main/scanner_idle_model.c", "main/scanner_display_model.c"],
+        (["tests/test_storage_main.c", "main/scanner_button_model.c", "main/scanner_idle_model.c", "main/scanner_display_model.c",
+          "main/gateway_state_model.c", "main/gateway_diagnostics.c", "main/scanner_clock_model.c"],
          ["maintenance_paper", "missing_card", "recovery_mount", "awake_hold", "wake_only", "before_eject", "after_eject", "resume_delayed", "resume_render_delayed", "enter_delayed", "recovery_delayed", "sleep_delayed"]),
     ]
     failed = []

@@ -39,7 +39,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Gateway state tests failed' }
     & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror -I (Join-Path $PSScriptRoot 'visual_stubs') -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_scanner_visual.c') (Join-Path $root 'main\scanner_display.c') (Join-Path $root 'main\scanner_led.c') (Join-Path $root 'main\scanner_display_model.c') (Join-Path $root 'main\scanner_led_model.c') (Join-Path $root 'main\scanner_idle_model.c') -o $binary
     if ($LASTEXITCODE -ne 0) { throw 'Visual driver test compilation failed' }
-    foreach ($visualCase in 'dma', 'partial', 'led', 'retry', 'wake', 'panel', 'led_init', 'gpio_init', 'allocation') {
+    foreach ($visualCase in 'dma', 'dma_pending', 'partial', 'led', 'retry', 'wake', 'panel', 'led_init', 'gpio_init', 'allocation', 'render_errors') {
         & $binary $visualCase
         if ($LASTEXITCODE -ne 0) { throw "Visual driver $visualCase tests failed" }
     }
@@ -53,6 +53,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'USB storage lifecycle tests failed' }
     & $Python (Join-Path $PSScriptRoot 'run_storage_mode_tests.py')
     if ($LASTEXITCODE -ne 0) { throw 'Storage mode and BOOT input tests failed' }
+    & $Python (Join-Path $PSScriptRoot 'run_gateway_main_tests.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Gateway main-loop fault tests failed' }
     & $Python (Join-Path $PSScriptRoot 'test_verify_scan.py')
     if ($LASTEXITCODE -ne 0) { throw 'Scan image verifier tests failed' }
     & $Python (Join-Path $PSScriptRoot 'test_jpeg_width_crop.py')

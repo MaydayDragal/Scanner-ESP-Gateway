@@ -33,9 +33,10 @@ bool scanner_led_start(void)
     return true;
 }
 
-void scanner_led_show(const scanner_display_state_t *state)
+esp_err_t scanner_led_show(const scanner_display_state_t *state)
 {
-    if(!enabled || !requested_awake) return;
+    if(!enabled) return last_error!=ESP_OK?last_error:ESP_ERR_INVALID_STATE;
+    if(!requested_awake) return ESP_ERR_INVALID_STATE;
     scanner_led_color_t color=scanner_led_color(state);
     esp_err_t result=led_strip_set_pixel(strip,0,color.red,color.green,color.blue);
     if(result==ESP_OK) result=led_strip_refresh(strip);
@@ -43,6 +44,7 @@ void scanner_led_show(const scanner_display_state_t *state)
         ESP_LOGE(TAG,"status LED update failed: %s",esp_err_to_name(result));
         if(last_error==ESP_OK) last_error=result;
     }
+    return result;
 }
 
 esp_err_t scanner_led_set_awake(bool awake)

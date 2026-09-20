@@ -50,6 +50,7 @@ with tempfile.TemporaryDirectory(prefix="capture-tests-") as directory:
         12:'rename2 collision2 stat7'
     }.items():
         expected_stages.update({name:stage for name in names.split()})
+    cases += ['phase_order']
     original_failures=set(cases[:cases.index('open2')]) - {'success','white','stat6'}
     for index,case in enumerate(cases):
         run=work/f'case-{index}';run.mkdir()

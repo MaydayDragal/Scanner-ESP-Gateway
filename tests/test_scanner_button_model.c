@@ -41,5 +41,27 @@ int main(void)
     assert(step(&b,3220000,true,true,true)==SCANNER_BUTTON_NONE);
     assert(step(&b,3250000,true,true,true)==SCANNER_BUTTON_WAKE);
     assert(step(&b,6000000,true,true,true)==SCANNER_BUTTON_NONE);
+    /* An awake, idle short gesture acknowledges on debounced release only. */
+    b=(scanner_button_model_t){0};
+    assert(step(&b,0,false,true,true)==SCANNER_BUTTON_NONE);
+    assert(step(&b,30000,false,true,true)==SCANNER_BUTTON_NONE);
+    assert(step(&b,100000,true,true,true)==SCANNER_BUTTON_NONE);
+    assert(step(&b,130000,true,true,true)==SCANNER_BUTTON_NONE);
+    assert(step(&b,300000,false,true,true)==SCANNER_BUTTON_NONE);
+    assert(step(&b,330000,false,true,true)==SCANNER_BUTTON_ACK);
+    assert(step(&b,360000,false,true,true)==SCANNER_BUTTON_NONE);
+    /* An undebounced pulse cannot acknowledge. */
+    assert(step(&b,400000,true,true,true)==SCANNER_BUTTON_NONE);
+    assert(step(&b,410000,false,true,true)==SCANNER_BUTTON_NONE);
+    assert(step(&b,440000,false,true,true)==SCANNER_BUTTON_NONE);
+    /* Busy-starting short presses and asleep-starting releases stay consumed. */
+    assert(step(&b,500000,true,true,false)==SCANNER_BUTTON_NONE);
+    assert(step(&b,530000,true,true,true)==SCANNER_BUTTON_NONE);
+    assert(step(&b,600000,false,true,true)==SCANNER_BUTTON_NONE);
+    assert(step(&b,630000,false,true,true)==SCANNER_BUTTON_NONE);
+    assert(step(&b,700000,true,false,true)==SCANNER_BUTTON_NONE);
+    assert(step(&b,730000,true,false,true)==SCANNER_BUTTON_WAKE);
+    assert(step(&b,800000,false,true,true)==SCANNER_BUTTON_NONE);
+    assert(step(&b,830000,false,true,true)==SCANNER_BUTTON_NONE);
     puts("BOOT button model passed");
 }

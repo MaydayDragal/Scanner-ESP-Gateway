@@ -49,6 +49,9 @@ static bool sleeping;
 static bool requested_awake;
 static bool backlight_ready;
 static esp_err_t last_error;
+/* A timed-out transfer may still reference strip/IO. Keep those resources and
+ * avoid tx_param: the IDF SPI panel implementation drains DMA with portMAX_DELAY. */
+static bool dma_uncertain;
 
 static bool color_done(esp_lcd_panel_io_handle_t io,esp_lcd_panel_io_event_data_t *event,void *context)
 {
@@ -126,7 +129,7 @@ bool scanner_display_start(void)
     esp_lcd_panel_io_handle_t io=NULL;
     bool bus_ready=false;
     panel=NULL; strip=NULL; transfer_done=NULL; enabled=false; sleeping=false;
-    requested_awake=true; backlight_ready=false; last_error=ESP_OK;
+    requested_awake=true; backlight_ready=false; last_error=ESP_OK; dma_uncertain=false;
     gpio_config_t backlight={.pin_bit_mask=1ULL<<GPIO_NUM_48,.mode=GPIO_MODE_OUTPUT};
     if(!lcd_ok(gpio_config(&backlight),"backlight config")) return false;
     backlight_ready=true;
@@ -167,9 +170,10 @@ fail:
     return false;
 }
 
-void scanner_display_show(const scanner_display_state_t *state)
+esp_err_t scanner_display_show(const scanner_display_state_t *state)
 {
-    if(!enabled || !requested_awake || sleeping) return;
+    if(!enabled) return last_error!=ESP_OK?last_error:ESP_ERR_INVALID_STATE;
+    if(!requested_awake || sleeping) return ESP_ERR_INVALID_STATE;
     scanner_display_view_t view;
     scanner_display_format(state,&view);
     for(int y=0;y<LCD_HEIGHT;y+=STRIP_HEIGHT) {
@@ -177,11 +181,13 @@ void scanner_display_show(const scanner_display_state_t *state)
         render_strip(state,&view,y,height);
         if(!lcd_ok(esp_lcd_panel_draw_bitmap(panel,0,y,LCD_WIDTH,y+height,strip),"draw") ||
            xSemaphoreTake(transfer_done,pdMS_TO_TICKS(1000))!=pdTRUE) {
+            dma_uncertain=true;
             ESP_LOGE(TAG,"display transfer timed out");
             if(enabled) last_error=ESP_ERR_TIMEOUT;
-            enabled=false; return;
+            enabled=false; return last_error;
         }
     }
+    return ESP_OK;
 }
 
 esp_err_t scanner_display_set_awake(bool awake)
@@ -197,7 +203,8 @@ esp_err_t scanner_display_set_awake(bool awake)
             if(light==ESP_OK) backlight_ready=true;
         }
         if(light==ESP_OK) light=gpio_set_level(GPIO_NUM_48,0);
-        esp_err_t screen=panel?esp_lcd_panel_disp_on_off(panel,false):ESP_OK;
+        esp_err_t screen=dma_uncertain?(last_error!=ESP_OK?last_error:ESP_ERR_TIMEOUT):
+            panel?esp_lcd_panel_disp_on_off(panel,false):ESP_OK;
         result=light!=ESP_OK?light:screen;
         sleeping=result==ESP_OK;
     } else {

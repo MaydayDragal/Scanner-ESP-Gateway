@@ -20,11 +20,13 @@ scanner_button_event_t scanner_button_step(scanner_button_model_t *button,
     if (now_us < button->raw_since_us || now_us - button->raw_since_us < 30000)
         return SCANNER_BUTTON_NONE;
     if (!pressed) {
+        bool acknowledge = button->stable_pressed && button->released_at_boot &&
+            !button->consumed && !button->wake_only && button->idle_at_start && awake && idle;
         button->stable_pressed = false;
         button->released_at_boot = true;
         button->candidate = false;
         button->consumed = false;
-        return SCANNER_BUTTON_NONE;
+        return acknowledge ? SCANNER_BUTTON_ACK : SCANNER_BUTTON_NONE;
     }
     if (!button->released_at_boot) return SCANNER_BUTTON_NONE;
     if (!button->stable_pressed) {

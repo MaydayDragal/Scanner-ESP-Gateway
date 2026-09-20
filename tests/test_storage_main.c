@@ -16,6 +16,7 @@ static storage_mode_t test_mode=STORAGE_AUTO_RO;
 static scanner_button_model_t button;
 static scanner_button_event_t pending;
 static bool saw_eject_prompt;
+static bool saw_recovery_prompt;
 static int wake_events, hold_events, recoveries;
 static int64_t sleep_started_us;
 static bool forced_idle;
@@ -58,22 +59,31 @@ bool scanner_button_take_event(scanner_button_event_t *event) {
 }
 bool scanner_display_start(void) { return true; }
 bool scanner_led_start(void) { return true; }
-void scanner_display_show(const scanner_display_state_t *state) {
+esp_err_t scanner_display_show(const scanner_display_state_t *state) {
     displays++;if(state->message && !strcmp(state->message,"EJECT DRIVE ON PC"))saw_eject_prompt=true;
+    scanner_display_view_t view;scanner_display_format(state,&view);
+    if(strstr(view.detail,"READ-ONLY SD RECOVERY"))saw_recovery_prompt=true;
     if(!strcmp(scenario,"resume_render_delayed") && resumes==1 &&
        state->phase==SCANNER_DISPLAY_WAITING && !render_delayed) {
         render_delayed=true;advance_time(5000000);
     }
+    return ESP_OK;
 }
-void scanner_led_show(const scanner_display_state_t *state) { (void)state; }
+esp_err_t scanner_led_show(const scanner_display_state_t *state) { (void)state;return ESP_OK; }
 void scanner_display_sleep(void) {
     if(!strcmp(scenario,"sleep_delayed")) { sleep_started_us=now;advance_time(3000000); }
 }
 void scanner_led_sleep(void) { if(!strcmp(scenario,"sleep_delayed"))advance_time(1000000); }
+esp_err_t scanner_display_set_awake(bool awake) { if(!awake)scanner_display_sleep();return ESP_OK; }
+esp_err_t scanner_led_set_awake(bool awake) { if(!awake)scanner_led_sleep();return ESP_OK; }
+esp_err_t scanner_display_last_error(void) { return ESP_OK; }
+esp_err_t scanner_led_last_error(void) { return ESP_OK; }
 scanner_wifi_result_t scanner_wifi_start(void) { return (scanner_wifi_result_t){.connected=true}; }
 scanner_wifi_result_t scanner_wifi_current(void) { return scanner_wifi_start(); }
 esci_status_t scanner_status(uint32_t ip) { (void)ip;return (esci_status_t){.valid=true,.paper=!strcmp(scenario,"maintenance_paper")?ESCI_PAPER_LOADED:ESCI_PAPER_EMPTY}; }
 scanner_capture_result_t scanner_capture(uint32_t ip,scanner_progress_fn progress,void *arg) { (void)ip;(void)progress;(void)arg;captures++;return (scanner_capture_result_t){.scan={.message="synthetic"}}; }
+scanner_capture_result_t scanner_capture_observed(uint32_t ip,scanner_progress_fn progress,void *arg,
+    scanner_capture_phase_fn phase,void *phase_arg) { (void)phase;(void)phase_arg;return scanner_capture(ip,progress,arg); }
 esp_err_t usb_storage_start_app(void) {
     if(!strcmp(scenario,"recovery_mount")) { ready=true;test_mode=STORAGE_RECOVERY_RO;return ESP_FAIL; }
     app_owned=strcmp(scenario,"missing_card")!=0;return app_owned?ESP_OK:ESP_FAIL;
@@ -117,6 +127,7 @@ int main(int argc,char **argv)
     assert(now>=12000000 && displays>0);
     assert(captures==0 && acquires==0);
     if(!strcmp(scenario,"awake_hold"))assert(maintenance_entries==1 && resumes==0);
+    if(!strcmp(scenario,"recovery_mount"))assert(saw_recovery_prompt);
     if(!strcmp(scenario,"wake_only"))assert(maintenance_entries==0 && resumes==0 && !visual_idle.asleep);
     if(!strcmp(scenario,"before_eject"))assert(resumes==0 && saw_eject_prompt);
     if(!strcmp(scenario,"after_eject"))assert(resumes==1 && test_mode==STORAGE_AUTO_RO);

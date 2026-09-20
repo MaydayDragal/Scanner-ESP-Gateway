@@ -43,14 +43,20 @@ static void format_gateway(const scanner_display_state_t *state,scanner_display_
     }
     copy(view->headline,sizeof(view->headline),stage);
     copy(view->detail,sizeof(view->detail),state->message);
+    if(state->clock && !state->clock->valid)
+        snprintf(view->footer,sizeof(view->footer),"TIME NOT SET|%u DPI RGB JPG%u",
+            (unsigned)SCANNER_DPI,(unsigned)SCANNER_JPEG_QUALITY);
     if(result->present) {
         char size[24]; size_text(size,sizeof(size),result->original_bytes);
         if(result->saved) snprintf(view->last_scan,sizeof(view->last_scan),"SAVED: %.24s %s",result->original_filename,size);
         else snprintf(view->last_scan,sizeof(view->last_scan),"LAST FAILED: STAGE %" PRIu32 " ERROR %" PRIu32,result->failed_stage,result->error_code);
         if(!result->acknowledged && (result->failed || result->cleanup_warning || result->crop_warning)) {
             view->tone=result->failed?SCANNER_DISPLAY_TONE_ERROR:SCANNER_DISPLAY_TONE_WARNING;
-            copy(view->detail,sizeof(view->detail),result->cleanup_warning?"SAVED / SCANNER CLEANUP WARNING":
-                result->crop_warning?"SAVED / CROP WARNING":result->message);
+            /* Current storage instructions must remain visible while the
+             * separate last-result row and alert tone retain the scan outcome. */
+            if(gateway->phase==GATEWAY_READY)
+                copy(view->detail,sizeof(view->detail),result->cleanup_warning?"SAVED / SCANNER CLEANUP WARNING":
+                    result->crop_warning?"SAVED / CROP WARNING":result->message);
         }
         if(!result->clock_valid) snprintf(view->footer,sizeof(view->footer),"TIME NOT SET|%u DPI RGB JPG%u",
             (unsigned)SCANNER_DPI,(unsigned)SCANNER_JPEG_QUALITY);
@@ -61,7 +67,8 @@ static void format_gateway(const scanner_display_state_t *state,scanner_display_
     }
     if(gateway->phase==GATEWAY_STOPPED) {
         view->tone=SCANNER_DISPLAY_TONE_ERROR;
-        snprintf(view->detail,sizeof(view->detail),"STORAGE UNCERTAIN / ERROR %" PRIu32,gateway->stop_error);
+        snprintf(view->detail,sizeof(view->detail),"%.27s / ERROR %" PRIu32,
+            state->message?state->message:"STORAGE UNCERTAIN",gateway->stop_error);
     }
 }
 

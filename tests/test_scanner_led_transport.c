@@ -46,13 +46,13 @@ int main(int argc,char **argv)
         assert(scanner_led_set_awake(false)==ESP_OK && !lit());
     } else {
         assert(scanner_led_start());
-        scanner_led_show(&display);
+        assert(scanner_led_show(&display)==ESP_OK);
         assert(lit());
         if(strcmp(argv[1],"transmit")==0 || strcmp(argv[1],"wait")==0 || strcmp(argv[1],"disable")==0) {
             fail_transmit=strcmp(argv[1],"wait")!=0;
             fail_wait=strcmp(argv[1],"wait")==0;
             fail_disable=strcmp(argv[1],"disable")==0;
-            scanner_led_show(&display);
+            assert(scanner_led_show(&display)==ESP_ERR_TIMEOUT);
             assert(lit() && scanner_led_last_error()==ESP_ERR_TIMEOUT);
             fail_transmit=false;fail_wait=false;
             if(fail_disable) {
@@ -81,7 +81,7 @@ int main(int argc,char **argv)
             fail_transmit=false;
             scanner_idle_activity(&idle,305000000);
             assert(scanner_led_set_awake(true)==ESP_OK);
-            scanner_led_show(&display);
+            assert(scanner_led_show(&display)==ESP_OK);
             assert(lit());
             assert(scanner_led_set_awake(false)==ESP_OK && !lit());
         } else if(strcmp(argv[1],"bounded")==0) {

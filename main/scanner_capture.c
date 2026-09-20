@@ -81,7 +81,8 @@ static int jpeg_error(jpeg_status_t status)
 {
     return status == JPEG_NO_MEMORY ? ENOMEM : status == JPEG_IO_ERROR ? EIO : EINVAL;
 }
-scanner_capture_result_t scanner_capture(uint32_t gateway_ip,scanner_progress_fn progress,void *progress_context)
+scanner_capture_result_t scanner_capture_observed(uint32_t gateway_ip,scanner_progress_fn progress,
+    void *progress_context,scanner_capture_phase_fn phase,void *phase_context)
 {
     scanner_capture_result_t result = {0};
     scan_files_t files;
@@ -110,10 +111,12 @@ scanner_capture_result_t scanner_capture(uint32_t gateway_ip,scanner_progress_fn
     capture_io_t context = {.socket=fd, .file=file, .deadline=esp_timer_get_time()+360LL*1000000,
         .progress=progress, .progress_context=progress_context};
     esci_io_t io = {&context, network_read, network_write, save, idle};
+    if (phase) phase(phase_context, SCANNER_CAPTURE_RECEIVING);
     errno = 0;
     result.scan = esci_scan(&io);
     int receive_error = errno;
     close(fd);
+    if (phase) phase(phase_context, SCANNER_CAPTURE_FINALIZING);
     if (!scan_files_sync_close(&file)) {
         failure(&result, SCANNER_CAPTURE_SYNC_ORIGINAL, errno, "SD sync failed; incomplete TMP retained");
         return result;
@@ -199,4 +202,9 @@ scanner_capture_result_t scanner_capture(uint32_t gateway_ip,scanner_progress_fn
     snprintf(result.crop_filename, sizeof(result.crop_filename), "%.12s", files.crop_final + 8);
     result.crop_outcome = SCANNER_CROP_SAVED;
     return result;
+}
+
+scanner_capture_result_t scanner_capture(uint32_t gateway_ip,scanner_progress_fn progress,void *progress_context)
+{
+    return scanner_capture_observed(gateway_ip,progress,progress_context,NULL,NULL);
 }
