@@ -1,41 +1,62 @@
-"""Decode an actual completed gateway JPEG; requires Pillow."""
+"""Decode a completed gateway JPEG and verify only documented scanner tables."""
 import argparse
+import json
 from pathlib import Path
+import sys
 
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
-EPSON_QUALITY_50 = {
-    0: [16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55,
-        14, 13, 16, 24, 40, 57, 69, 56, 14, 17, 22, 29, 51, 87, 80, 62,
-        18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92,
-        49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99],
-    1: [17, 18, 24, 47, 99, 99, 99, 99, 18, 21, 26, 66, 99, 99, 99, 99,
-        24, 26, 56, 99, 99, 99, 99, 99, 47, 66, 99, 99, 99, 99, 99, 99,
-        99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
-        99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99],
-}
 
-parser = argparse.ArgumentParser()
-parser.add_argument("image", type=Path)
-parser.add_argument("--dpi", type=int, choices=(300, 600), default=300)
-parser.add_argument("--quality", type=int, choices=range(1, 101), default=75)
-parser.add_argument("--height", type=int, help="expected saved image height in pixels")
-args = parser.parse_args()
-with Image.open(args.image) as image:
-    assert image.format == "JPEG", "Not a JPEG"
-    assert image.mode == "RGB", "Not 24-bit color"
-    assert image.info.get("dpi") == (args.dpi, args.dpi), "Unexpected DPI metadata"
-    assert 0 < image.width <= int(8.5 * args.dpi), "Unexpected saved page width"
-    assert 0 < image.height <= 14 * args.dpi and image.height % 8 == 0, "Unexpected acquisition height"
-    if args.height is not None:
-        assert image.height == args.height, "Unexpected saved page height"
-    image.load()  # Reject truncated files; do not enable LOAD_TRUNCATED_IMAGES.
-    values = [value for table in image.quantization.values() for value in table]
-    if args.quality == 100:
-        assert all(value == 1 for value in values), "Unexpected quality 100 tables"
-    elif args.quality == 50:
-        assert image.quantization == EPSON_QUALITY_50, "Unexpected Epson quality 50 tables"
-    else:
-        assert any(value > 1 for value in values), "Image still has quality 100 tables"
-    print(f"Full JPEG decode passed: {image.width} x {image.height}, RGB, {args.dpi} dpi, quality {args.quality} tables")
+TABLES = Path(__file__).with_name("fixtures") / "epson_quantization.json"
+
+
+def check_scan(path, dpi, height, quality):
+    with Image.open(path) as image:
+        if image.format != "JPEG":
+            raise ValueError("Not a JPEG")
+        if image.mode != "RGB":
+            raise ValueError("Not 24-bit color")
+        if image.info.get("dpi") != (dpi, dpi):
+            raise ValueError("Unexpected DPI metadata")
+        if not 0 < image.width <= int(8.5 * dpi):
+            raise ValueError("Unexpected saved page width")
+        if not (0 < image.height <= 14 * dpi and image.height % 8 == 0):
+            raise ValueError("Unexpected acquisition height")
+        if height is not None and image.height != height:
+            raise ValueError("Unexpected saved page height")
+        image.load()  # Reject truncated files; do not enable LOAD_TRUNCATED_IMAGES.
+
+        if quality is not None:
+            registry = json.loads(TABLES.read_text(encoding="utf-8"))
+            entry = registry.get(str(quality))
+            if not entry or entry.get("verified") is not True or not entry.get("tables"):
+                raise ValueError(f"quality unverified: no registered Epson quality {quality} tables")
+            observed = {str(index): values for index, values in image.quantization.items()}
+            if observed != entry["tables"]:
+                raise ValueError(f"Unexpected Epson quality {quality} tables")
+            quality_status = f"quality {quality} tables verified"
+        else:
+            quality_status = "quality unverified (no --quality requested)"
+
+        return image.width, image.height, quality_status
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("image", type=Path)
+    parser.add_argument("--dpi", type=int, choices=(300, 600), default=300)
+    parser.add_argument("--quality", type=int, choices=range(1, 101))
+    parser.add_argument("--height", type=int, help="expected saved image height in pixels")
+    args = parser.parse_args()
+    try:
+        width, height, quality_status = check_scan(args.image, args.dpi, args.height, args.quality)
+    except (OSError, ValueError, UnidentifiedImageError, KeyError, TypeError, json.JSONDecodeError) as error:
+        print(f"Scan verification failed: {error}", file=sys.stderr)
+        return 1
+    print(f"Full JPEG decode passed: {width} x {height}, RGB, {args.dpi} dpi; {quality_status}")
     print(f"File size: {args.image.stat().st_size:,} bytes")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

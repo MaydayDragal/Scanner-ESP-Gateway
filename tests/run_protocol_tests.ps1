@@ -31,7 +31,7 @@ try {
     & $Python (Join-Path $PSScriptRoot 'run_usb_storage_tests.py')
     if ($LASTEXITCODE -ne 0) { throw 'USB storage lifecycle tests failed' }
     & $Python (Join-Path $PSScriptRoot 'test_verify_scan.py')
-    if ($LASTEXITCODE -ne 0) { throw 'Scan image dimension tests failed' }
+    if ($LASTEXITCODE -ne 0) { throw 'Scan image verifier tests failed' }
     & $Python (Join-Path $PSScriptRoot 'test_jpeg_width_crop.py')
     if ($LASTEXITCODE -ne 0) { throw 'JPEG width crop tests failed' }
 } finally {

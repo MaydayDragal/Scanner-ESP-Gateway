@@ -1,0 +1,42 @@
+name: QA
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned host test tools
+        run: python -m pip install -r tests/requirements.txt
+      - name: Run protocol and image tests without a build directory
+        shell: pwsh
+        run: |
+          if (Test-Path build) { throw 'Expected clean checkout without build directory' }
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests/run_protocol_tests.ps1
+
+  idf-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ESP-IDF 5.5.5
+        uses: espressif/install-esp-idf-action@v1
+        with:
+          version: v5.5.5
+      - name: Create job-local dummy Wi-Fi credentials
+        shell: bash
+        run: |
+          printf '%s\n' '#pragma once' \
+            '#define SCANNER_WIFI_SSID "CI-DUMMY-SCANNER"' \
+            '#define SCANNER_WIFI_PASSWORD "CI-DUMMY-PASSWORD"' \
+            '#define TIME_WIFI_SSID "CI-DUMMY-TIME"' \
+            '#define TIME_WIFI_PASSWORD "CI-DUMMY-TIME-PASSWORD"' \
+            > main/scanner_wifi_local.h
+      - name: Build firmware from a clean checkout
+        shell: bash
+        run: idf.py -B build/reliability-clean -D SDKCONFIG=build/reliability-clean/sdkconfig build

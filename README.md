@@ -32,9 +32,11 @@ The onboard RGB status LED mirrors the same state: white while starting, yellow 
 
 ## Verification
 
-- Host protocol, storage lifecycle, and image-dimension tests: `powershell -ExecutionPolicy Bypass -File tests/run_protocol_tests.ps1 -Python <python.exe>` (requires ziglang and Pillow).
+- Install the pinned host test packages: `python -m pip install -r tests/requirements.txt` (Pillow 12.3.0 and ziglang 0.16.0).
+- Host protocol, storage lifecycle, image-verifier, and JPEG crop tests: `powershell -NoProfile -ExecutionPolicy Bypass -File tests/run_protocol_tests.ps1` (or add `-Python <python.exe>`). The runner works in a clean checkout with no `build` directory.
 - USB MSC hardware check: `powershell -ExecutionPolicy Bypass -File tests/usb_msc_smoke.ps1`.
-- Image validation: `python tests/verify_scan.py image.JPG` (requires Pillow; defaults to 300 dpi and quality 75; use `--dpi 600 --quality 50` for the previous setting).
+- Image validation: `python tests/verify_scan.py image.JPG` checks full decode, RGB, 300 dpi metadata, and page dimensions. It reports **quality unverified** unless `--quality` is supplied. Explicit quality verification succeeds only for a registered Epson quantization-table set. The recorded quality-50 tables are in `tests/fixtures/epson_quantization.json`; a historical scanner observation is documented in [protocol notes](docs/scanner-protocol-notes.md). There is no retained table set for quality 75, so `--quality 75` exits nonzero with `quality unverified` until a known scanner sample supplies it. Synthetic test JPEGs are not evidence of scanner output.
+- CI runs the host suite and a clean ESP-IDF 5.5.5 build with job-local dummy Wi-Fi values. It does not publish firmware binaries.
 
 Hardware verification on 2026-09-18 passed: Windows enumerated the device as a writable local FAT32 USB disk at `S:`. File creation, readback, rename, and deletion passed. A host-written file survived a full scan handoff unchanged. The previous 600 dpi quality-50 setting produced fully decoded narrow and full-width scans with automatic width selection. See [protocol notes](docs/scanner-protocol-notes.md) for filenames and timings.
 
@@ -44,16 +46,16 @@ Copy `main/scanner_wifi_local.h.example` to ignored `main/scanner_wifi_local.h` 
 
 To timestamp new scans, add `TIME_WIFI_SSID` and `TIME_WIFI_PASSWORD` for a 2.4 GHz home network to that ignored header. At startup the ESP briefly connects to home Wi-Fi, synchronizes Internet time, then reconnects to the scanner. FAT file dates use Eastern time with daylight saving. Existing files keep their original timestamps.
 
-Build using ESP-IDF v5.5.5:
+Build using ESP-IDF v5.5.5, with `esp_tinyusb` 2.3.0 and TinyUSB 0.21.0~2 locked in `dependencies.lock`:
 
 ```powershell
-eim run 'idf.py build' v5.5.5
+eim run 'idf.py -B build/reliability-clean -D SDKCONFIG=build/reliability-clean/sdkconfig build' v5.5.5
 ```
 
 Flash the board on COM3:
 
 ```powershell
-eim run 'idf.py -p COM3 flash' v5.5.5
+eim run 'idf.py -B build/reliability-clean -p COM3 flash' v5.5.5
 ```
 
 To enter download mode, hold BOOT, tap RESET, then release BOOT. After flashing, this board may need one RESET tap without BOOT. The running application enumerates as a USB mass-storage device rather than a flashing serial port.
