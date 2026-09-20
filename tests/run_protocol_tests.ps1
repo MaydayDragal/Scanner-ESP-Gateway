@@ -8,7 +8,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Protocol test compilation failed' }
     & $binary
     if ($LASTEXITCODE -ne 0) { throw 'Protocol tests failed' }
-    & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_jpeg_crop.c') (Join-Path $root 'main\jpeg_crop.c') -o $binary
+    & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_jpeg_crop.c') (Join-Path $root 'main\jpeg_crop.c') (Join-Path $root 'main\jpeg_stream.c') -o $binary
     if ($LASTEXITCODE -ne 0) { throw 'JPEG crop test compilation failed' }
     & $binary $jpegFixture
     if ($LASTEXITCODE -ne 0) { throw 'JPEG crop tests failed' }
@@ -34,6 +34,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Scan image verifier tests failed' }
     & $Python (Join-Path $PSScriptRoot 'test_jpeg_width_crop.py')
     if ($LASTEXITCODE -ne 0) { throw 'JPEG width crop tests failed' }
+    & $Python (Join-Path $PSScriptRoot 'test_jpeg_pipeline.py')
+    if ($LASTEXITCODE -ne 0) { throw 'JPEG pipeline tests failed' }
+    & $Python (Join-Path $PSScriptRoot 'run_capture_tests.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Capture transaction tests failed' }
     & $Python (Join-Path $PSScriptRoot 'test_rebase_dependencies_lock.py')
     if ($LASTEXITCODE -ne 0) { throw 'Dependency lock relocation tests failed' }
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'test_probe_es60w.ps1')

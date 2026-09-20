@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory(prefix="jpeg-width-test-") as library_directory
     subprocess.run(
         [sys.executable, "-m", "ziglang", "cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
          "-shared", "-I", str(root / "main"), str(root / "main" / "jpeg_width_crop.c"),
-         "-o", str(library)],
+         str(root / "main" / "jpeg_stream.c"), "-o", str(library)],
         check=True,
     )
     loaded_library = ctypes.CDLL(str(library))
