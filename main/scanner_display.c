@@ -46,6 +46,9 @@ static SemaphoreHandle_t transfer_done;
 static uint16_t *strip;
 static bool enabled;
 static bool sleeping;
+static bool requested_awake;
+static bool backlight_ready;
+static esp_err_t last_error;
 
 static bool color_done(esp_lcd_panel_io_handle_t io,esp_lcd_panel_io_event_data_t *event,void *context)
 {
@@ -113,6 +116,7 @@ static bool lcd_ok(esp_err_t result,const char *operation)
 {
     if(result==ESP_OK) return true;
     ESP_LOGE(TAG,"%s failed: %s",operation,esp_err_to_name(result));
+    last_error=result;
     enabled=false;
     return false;
 }
@@ -122,8 +126,10 @@ bool scanner_display_start(void)
     esp_lcd_panel_io_handle_t io=NULL;
     bool bus_ready=false;
     panel=NULL; strip=NULL; transfer_done=NULL; enabled=false; sleeping=false;
+    requested_awake=true; backlight_ready=false; last_error=ESP_OK;
     gpio_config_t backlight={.pin_bit_mask=1ULL<<GPIO_NUM_48,.mode=GPIO_MODE_OUTPUT};
     if(!lcd_ok(gpio_config(&backlight),"backlight config")) return false;
+    backlight_ready=true;
     if(!lcd_ok(gpio_set_level(GPIO_NUM_48,0),"backlight off")) return false;
     spi_bus_config_t bus={.mosi_io_num=GPIO_NUM_45,.miso_io_num=-1,.sclk_io_num=GPIO_NUM_40,
         .quadwp_io_num=-1,.quadhd_io_num=-1,.max_transfer_sz=LCD_WIDTH*STRIP_HEIGHT*sizeof(uint16_t)};
@@ -131,7 +137,7 @@ bool scanner_display_start(void)
     bus_ready=true;
     transfer_done=xSemaphoreCreateBinary();
     strip=heap_caps_malloc(LCD_WIDTH*STRIP_HEIGHT*sizeof(uint16_t),MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL);
-    if(!transfer_done||!strip) { ESP_LOGE(TAG,"display buffer allocation failed"); goto fail; }
+    if(!transfer_done||!strip) { last_error=ESP_ERR_NO_MEM; ESP_LOGE(TAG,"display buffer allocation failed"); goto fail; }
     esp_lcd_panel_io_spi_config_t io_config={.cs_gpio_num=GPIO_NUM_42,.dc_gpio_num=GPIO_NUM_41,
         .spi_mode=0,.pclk_hz=40*1000*1000,.trans_queue_depth=1,.on_color_trans_done=color_done,
         .lcd_cmd_bits=8,.lcd_param_bits=8};
@@ -163,10 +169,7 @@ fail:
 
 void scanner_display_show(const scanner_display_state_t *state)
 {
-    if(!enabled) return;
-    bool waking=sleeping;
-    if(waking && !lcd_ok(esp_lcd_panel_disp_on_off(panel,true),"panel wake")) return;
-    sleeping=false;
+    if(!enabled || !requested_awake || sleeping) return;
     scanner_display_view_t view;
     scanner_display_format(state,&view);
     for(int y=0;y<LCD_HEIGHT;y+=STRIP_HEIGHT) {
@@ -174,16 +177,38 @@ void scanner_display_show(const scanner_display_state_t *state)
         render_strip(state,&view,y,height);
         if(!lcd_ok(esp_lcd_panel_draw_bitmap(panel,0,y,LCD_WIDTH,y+height,strip),"draw") ||
            xSemaphoreTake(transfer_done,pdMS_TO_TICKS(1000))!=pdTRUE) {
-            ESP_LOGE(TAG,"display transfer timed out"); enabled=false; return;
+            ESP_LOGE(TAG,"display transfer timed out");
+            if(enabled) last_error=ESP_ERR_TIMEOUT;
+            enabled=false; return;
         }
     }
-    if(waking) lcd_ok(gpio_set_level(GPIO_NUM_48,1),"backlight wake");
 }
 
-void scanner_display_sleep(void)
+esp_err_t scanner_display_set_awake(bool awake)
 {
-    if(!enabled || sleeping) return;
-    if(!lcd_ok(gpio_set_level(GPIO_NUM_48,0),"backlight sleep")) return;
-    if(!lcd_ok(esp_lcd_panel_disp_on_off(panel,false),"panel sleep")) return;
-    sleeping=true;
+    requested_awake=awake;
+    esp_err_t result=ESP_OK;
+    if(!awake) {
+        /* GPIO must remain usable even when a DMA fault disabled rendering. */
+        esp_err_t light=ESP_OK;
+        if(!backlight_ready) {
+            gpio_config_t config={.pin_bit_mask=1ULL<<GPIO_NUM_48,.mode=GPIO_MODE_OUTPUT};
+            light=gpio_config(&config);
+            if(light==ESP_OK) backlight_ready=true;
+        }
+        if(light==ESP_OK) light=gpio_set_level(GPIO_NUM_48,0);
+        esp_err_t screen=panel?esp_lcd_panel_disp_on_off(panel,false):ESP_OK;
+        result=light!=ESP_OK?light:screen;
+        sleeping=result==ESP_OK;
+    } else {
+        if(!enabled) return last_error!=ESP_OK?last_error:ESP_ERR_INVALID_STATE;
+        result=esp_lcd_panel_disp_on_off(panel,true);
+        if(result==ESP_OK) result=gpio_set_level(GPIO_NUM_48,1);
+        sleeping=result!=ESP_OK;
+    }
+    if(result!=ESP_OK) last_error=result;
+    return result;
 }
+
+esp_err_t scanner_display_last_error(void) { return last_error; }
+void scanner_display_sleep(void) { (void)scanner_display_set_awake(false); }

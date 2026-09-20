@@ -1,0 +1,2 @@
+# Preserve pinned upstream bytes independently of core.autocrlf.
+* -text

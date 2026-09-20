@@ -56,6 +56,35 @@ class LockRebaseTests(unittest.TestCase):
             with self.subTest(old_source=bad), self.assertRaises(ValueError):
                 rebase_local_source(lock, source)
 
+    def test_led_override_relocates_without_changing_usb_or_versions(self):
+        component = "espressif/led_strip"
+        self.lock["dependencies"][component]["source"] = {
+            "type": "local", "path": "C:\\removed\\components\\led_strip"}
+        before = deepcopy(self.lock)
+        for path in ("D:\\new checkout\\components\\led_strip", "/runner/components/led_strip"):
+            with self.subTest(path=path):
+                source = {"type": "local", "path": path}
+                expected = deepcopy(self.lock)
+                expected["dependencies"][component]["source"] = source
+                self.assertEqual(rebase_local_source(self.lock, source, component), expected)
+                self.assertEqual(self.lock, before)
+
+    def test_led_registry_entry_stays_for_normal_resolution(self):
+        source = {"type": "local", "path": "/runner/components/led_strip"}
+        self.assertEqual(rebase_local_source(self.lock, source, "espressif/led_strip"), self.lock)
+
+    def test_only_reviewed_component_versions_are_rebased(self):
+        source = {"type": "local", "path": "/runner/components/led_strip"}
+        before = deepcopy(self.lock)
+        with self.assertRaises(ValueError):
+            rebase_local_source(self.lock, source, "espressif/tinyusb")
+        self.assertEqual(self.lock, before)
+        self.lock["dependencies"]["espressif/led_strip"]["version"] = "3.0.4"
+        before = deepcopy(self.lock)
+        with self.assertRaises(ValueError):
+            rebase_local_source(self.lock, source, "espressif/led_strip")
+        self.assertEqual(self.lock, before)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -33,6 +33,18 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'LED model test compilation failed' }
     & $binary
     if ($LASTEXITCODE -ne 0) { throw 'LED model tests failed' }
+    & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_gateway_state.c') (Join-Path $root 'main\gateway_state_model.c') (Join-Path $root 'main\gateway_diagnostics.c') (Join-Path $root 'main\scanner_display_model.c') (Join-Path $root 'main\scanner_led_model.c') -o $binary
+    if ($LASTEXITCODE -ne 0) { throw 'Gateway state test compilation failed' }
+    & $binary
+    if ($LASTEXITCODE -ne 0) { throw 'Gateway state tests failed' }
+    & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror -I (Join-Path $PSScriptRoot 'visual_stubs') -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_scanner_visual.c') (Join-Path $root 'main\scanner_display.c') (Join-Path $root 'main\scanner_led.c') (Join-Path $root 'main\scanner_display_model.c') (Join-Path $root 'main\scanner_led_model.c') (Join-Path $root 'main\scanner_idle_model.c') -o $binary
+    if ($LASTEXITCODE -ne 0) { throw 'Visual driver test compilation failed' }
+    foreach ($visualCase in 'dma', 'partial', 'led', 'retry', 'wake', 'panel', 'led_init', 'gpio_init', 'allocation') {
+        & $binary $visualCase
+        if ($LASTEXITCODE -ne 0) { throw "Visual driver $visualCase tests failed" }
+    }
+    & $Python (Join-Path $PSScriptRoot 'run_led_transport_tests.py')
+    if ($LASTEXITCODE -ne 0) { throw 'LED transport tests failed' }
     & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_storage_handoff_model.c') (Join-Path $root 'main\storage_handoff_model.c') -o $binary
     if ($LASTEXITCODE -ne 0) { throw 'Storage handoff model test compilation failed' }
     & $binary

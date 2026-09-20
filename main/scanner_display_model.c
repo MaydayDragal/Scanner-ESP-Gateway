@@ -24,6 +24,47 @@ bool scanner_display_apply_scanner_status(scanner_display_state_t *state,bool wi
     return changed;
 }
 
+static void format_gateway(const scanner_display_state_t *state,scanner_display_view_t *view)
+{
+    const gateway_state_t *gateway=state->gateway;
+    const gateway_result_t *result=&gateway->last_result;
+    const char *stage="STARTING";
+    view->tone=SCANNER_DISPLAY_TONE_WARNING;
+    switch(gateway->phase) {
+        case GATEWAY_STARTING: break;
+        case GATEWAY_READY: stage="READY TO SCAN"; view->tone=SCANNER_DISPLAY_TONE_READY; break;
+        case GATEWAY_ACQUIRING: stage="ACQUIRING STORAGE"; view->tone=SCANNER_DISPLAY_TONE_ACTIVE; break;
+        case GATEWAY_CAPTURING: stage="SCANNING"; view->tone=SCANNER_DISPLAY_TONE_ACTIVE; break;
+        case GATEWAY_FINALIZING: stage="FINALIZING"; view->tone=SCANNER_DISPLAY_TONE_ACTIVE; break;
+        case GATEWAY_RESTORING: stage="RESTORING USB"; view->tone=SCANNER_DISPLAY_TONE_ACTIVE; break;
+        case GATEWAY_MAINTENANCE: stage="MAINTENANCE"; break;
+        case GATEWAY_TIME_SYNC: stage="TIME SYNC"; break;
+        case GATEWAY_STOPPED: stage="STOPPED"; view->tone=SCANNER_DISPLAY_TONE_ERROR; break;
+    }
+    copy(view->headline,sizeof(view->headline),stage);
+    copy(view->detail,sizeof(view->detail),state->message);
+    if(result->present) {
+        char size[24]; size_text(size,sizeof(size),result->original_bytes);
+        if(result->saved) snprintf(view->last_scan,sizeof(view->last_scan),"SAVED: %.24s %s",result->original_filename,size);
+        else snprintf(view->last_scan,sizeof(view->last_scan),"LAST FAILED: STAGE %" PRIu32 " ERROR %" PRIu32,result->failed_stage,result->error_code);
+        if(!result->acknowledged && (result->failed || result->cleanup_warning || result->crop_warning)) {
+            view->tone=result->failed?SCANNER_DISPLAY_TONE_ERROR:SCANNER_DISPLAY_TONE_WARNING;
+            copy(view->detail,sizeof(view->detail),result->cleanup_warning?"SAVED / SCANNER CLEANUP WARNING":
+                result->crop_warning?"SAVED / CROP WARNING":result->message);
+        }
+        if(!result->clock_valid) snprintf(view->footer,sizeof(view->footer),"TIME NOT SET|%u DPI RGB JPG%u",
+            (unsigned)SCANNER_DPI,(unsigned)SCANNER_JPEG_QUALITY);
+    }
+    if(gateway->phase==GATEWAY_CAPTURING) {
+        char size[24]; size_text(size,sizeof(size),state->scan_bytes);
+        snprintf(view->detail,sizeof(view->detail),"%s RECEIVED",size);
+    }
+    if(gateway->phase==GATEWAY_STOPPED) {
+        view->tone=SCANNER_DISPLAY_TONE_ERROR;
+        snprintf(view->detail,sizeof(view->detail),"STORAGE UNCERTAIN / ERROR %" PRIu32,gateway->stop_error);
+    }
+}
+
 void scanner_display_format(const scanner_display_state_t *state, scanner_display_view_t *view)
 {
     memset(view,0,sizeof(*view));
@@ -39,6 +80,7 @@ void scanner_display_format(const scanner_display_state_t *state, scanner_displa
         snprintf(view->last_scan,sizeof(view->last_scan),"LAST: %.12s %s %" PRIu32 ".%" PRIu32 " s",state->last_filename,size,
             state->last_duration_ms/1000,(state->last_duration_ms%1000)/100);
     } else copy(view->last_scan,sizeof(view->last_scan),"LAST: NONE");
+    if(state->gateway) { format_gateway(state,view); return; }
     switch(state->phase) {
         case SCANNER_DISPLAY_STARTING:
             copy(view->headline,sizeof(view->headline),"STARTING GATEWAY");
@@ -67,6 +109,15 @@ void scanner_display_format(const scanner_display_state_t *state, scanner_displa
             copy(view->headline,sizeof(view->headline),"SCAN FAILED");
             copy(view->detail,sizeof(view->detail),state->message?state->message:"UNKNOWN ERROR");
             view->tone=SCANNER_DISPLAY_TONE_ERROR;
+            break;
+        case SCANNER_DISPLAY_ACQUIRING:
+        case SCANNER_DISPLAY_FINALIZING:
+        case SCANNER_DISPLAY_RESTORING:
+        case SCANNER_DISPLAY_MAINTENANCE:
+        case SCANNER_DISPLAY_TIME_SYNC:
+        case SCANNER_DISPLAY_STOPPED:
+            copy(view->headline,sizeof(view->headline),state->message?state->message:"GATEWAY BUSY");
+            view->tone=state->phase==SCANNER_DISPLAY_STOPPED?SCANNER_DISPLAY_TONE_ERROR:SCANNER_DISPLAY_TONE_ACTIVE;
             break;
     }
 }
