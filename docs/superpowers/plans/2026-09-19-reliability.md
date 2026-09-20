@@ -283,7 +283,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests/test_probe_es60w.ps1
 **Depends on:** R1-R9. **Files:** update `README.md`, `docs/scanner-protocol-notes.md`, QA finding status; create `docs/qa/reliability-acceptance.md` with actual results.
 
 - [x] Run full host tests, clean CI-equivalent build, size check, and source review of ownership/publication/error paths. Require a fitting image before flashing. Keep large feature code out of this release; flash expansion is P2.
-- [ ] Prepare an expendable card and a private backup of any needed card contents through a verified stable reader. The unresolved recovery card is not a test fixture. Record firmware hash and build configuration.
+- [x] Prepare an expendable card and a private backup of any needed card contents through a verified stable reader. The unresolved recovery card is not a test fixture. Record firmware hash and build configuration.
 - [ ] Flash the candidate and verify normal read-only mode, writable maintenance operations and hashes, paper blocked during maintenance, successful Windows safe eject, and explicit resume. Test prevented/rejected/aborted release sequences. Verify no APP mount before release.
 - [ ] Scan a 20-page mixed corpus, including dark right-side content and narrow/full-width sheets, without reset. Verify originals and derivatives, actual byte sizes, timestamps/clock warnings, filenames, and no FAT errors. Exercise 600 dpi and quality 50 through controlled builds until the runtime profiles exist.
 - [ ] On expendable media, test full-card and injected I/O failures plus controlled interruption during original/derivative publication. Check existing file hashes and FAT consistency after each fault. A decoder success alone is not sufficient.

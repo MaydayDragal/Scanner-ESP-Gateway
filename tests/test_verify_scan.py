@@ -38,9 +38,32 @@ class ScanDimensionsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="scan-quality-") as directory:
             path = Path(directory) / "synthetic-quality-50.jpg"
             Image.new("RGB", (256, 128), "white").save(path, quality=50, dpi=(300, 300))
-            result = verify(path, expected_quality=75)
-            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn("quality unverified", result.stderr)
+            for optimized in (False, True):
+                with self.subTest(python_optimized=optimized):
+                    result = verify(path, expected_quality=75, python_optimized=optimized)
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn("Unexpected Epson quality 75 tables", result.stderr)
+
+    def test_registered_quality_75_tables_are_accepted(self):
+        with tempfile.TemporaryDirectory(prefix="scan-quality-") as directory:
+            path = Path(directory) / "synthetic-quality-75.jpg"
+            Image.new("RGB", (256, 128), "white").save(path, quality=75, dpi=(300, 300))
+            for optimized in (False, True):
+                with self.subTest(python_optimized=optimized):
+                    result = verify(path, expected_quality=75, python_optimized=optimized)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn("quality 75 tables verified", result.stdout)
+
+    def test_unregistered_quality_reports_unverified(self):
+        with tempfile.TemporaryDirectory(prefix="scan-quality-") as directory:
+            path = Path(directory) / "synthetic-quality-74.jpg"
+            Image.new("RGB", (256, 128), "white").save(path, quality=74, dpi=(300, 300))
+            for optimized in (False, True):
+                with self.subTest(python_optimized=optimized):
+                    result = verify(path, expected_quality=74, python_optimized=optimized)
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn("quality unverified: no registered Epson quality 74 tables",
+                                  result.stderr)
 
     def test_registered_quality_50_tables_are_accepted(self):
         with tempfile.TemporaryDirectory(prefix="scan-quality-") as directory:
@@ -54,9 +77,11 @@ class ScanDimensionsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="scan-quality-") as directory:
             path = Path(directory) / "synthetic-quality-75.jpg"
             Image.new("RGB", (256, 128), "white").save(path, quality=75, dpi=(300, 300))
-            result = verify(path, expected_quality=50)
-            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn("Unexpected Epson quality 50 tables", result.stderr)
+            for optimized in (False, True):
+                with self.subTest(python_optimized=optimized):
+                    result = verify(path, expected_quality=50, python_optimized=optimized)
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn("Unexpected Epson quality 50 tables", result.stderr)
 
     def test_invalid_dimensions_fail_with_optimized_python(self):
         with tempfile.TemporaryDirectory(prefix="scan-dimensions-") as directory:
@@ -70,9 +95,11 @@ class ScanDimensionsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="scan-quality-") as directory:
             path = Path(directory) / "synthetic-quality-50.jpg"
             Image.new("RGB", (256, 128), "white").save(path, quality=50, dpi=(300, 300))
-            result = verify(path)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn("quality unverified", result.stdout)
+            for optimized in (False, True):
+                with self.subTest(python_optimized=optimized):
+                    result = verify(path, python_optimized=optimized)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn("quality unverified", result.stdout)
 
 if __name__ == "__main__":
     unittest.main(testRunner=unittest.TextTestRunner(stream=sys.stdout))
