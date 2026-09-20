@@ -94,7 +94,8 @@ scanner_capture_result_t scanner_capture(uint32_t gateway_ip,scanner_progress_fn
         failure(&result, SCANNER_CAPTURE_RESERVE, errno, "Cannot reserve scan file on SD");
         return result;
     }
-    snprintf(result.filename, sizeof(result.filename), "%s", files.original_scratch + 8);
+    /* scan_files names have a /sdcard/ prefix and a 12-character 8.3 basename. */
+    snprintf(result.filename, sizeof(result.filename), "%.12s", files.original_scratch + 8);
     int fd = scanner_wifi_open_connection(gateway_ip);
     if (fd < 0) {
         int error = errno;
@@ -159,7 +160,7 @@ scanner_capture_result_t scanner_capture(uint32_t gateway_ip,scanner_progress_fn
     }
     bool published = scan_files_publish(&files, false, &result.saved_bytes);
     result.file_saved = files.original_published;
-    if (result.file_saved) snprintf(result.filename, sizeof(result.filename), "%s", files.original_final + 8);
+    if (result.file_saved) snprintf(result.filename, sizeof(result.filename), "%.12s", files.original_final + 8);
     if (!published) {
         failure(&result, SCANNER_CAPTURE_PUBLISH_ORIGINAL, errno, "Original publication or size check failed");
         return result;
@@ -195,7 +196,7 @@ scanner_capture_result_t scanner_capture(uint32_t gateway_ip,scanner_progress_fn
         failure(&result, SCANNER_CAPTURE_PUBLISH_CROP, errno, "Original saved; crop derivative publication failed");
         return result;
     }
-    snprintf(result.crop_filename, sizeof(result.crop_filename), "%s", files.crop_final + 8);
+    snprintf(result.crop_filename, sizeof(result.crop_filename), "%.12s", files.crop_final + 8);
     result.crop_outcome = SCANNER_CROP_SAVED;
     return result;
 }
