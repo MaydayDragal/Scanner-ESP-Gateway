@@ -1,0 +1,21 @@
+{
+  "LICENSE": "f878d62e47e693ea64160218edb1b9b4755f4839a3179e5bef4a6b0359399431",
+  "src/class/msc/msc.h": "53d55797b88f0461372a339a69032a80db0284cb376e27fc4312602660d81700",
+  "src/class/msc/msc_device.c": "9bba988f5c1e83db1d565e55e934a8e9dd7f5e5085820b6c555ffa1484473ac5",
+  "src/class/msc/msc_device.h": "c769bfb8782e0a7759fb993014ff86dbebcf4d1410c5e89b95a2874dc98d49ad",
+  "src/common/tusb_common.h": "a664fab5d2c3c635f64eca7a379e76934cb3ba6969b99260064946573e5396b1",
+  "src/common/tusb_compiler.h": "7f726abb8a3de111f55d95de60d6f9607d3464eb52b7780f37b1e10dae19ecfc",
+  "src/common/tusb_debug.h": "25c5e7f4ca87daa1619b0dc7042de641092a8f5970b6138f31a4d090b47a25be",
+  "src/common/tusb_fifo.h": "6d4af6262d85a13a38d7e211419c0491e78bc076e6d7c5bba38613c011bf8166",
+  "src/common/tusb_mcu.h": "ef584be007e78926dac89863b87e1e2bdd0358d9a89ed68c433f9f57ab1dd953",
+  "src/common/tusb_private.h": "6216aa425618d3c88ff57c0d2d29caace1b59bad1c361627a9a7401e4994fa97",
+  "src/common/tusb_types.h": "cb6f1d329629fe7a91a2509d991878298070d203d804eab7f90a260de1c977a4",
+  "src/common/tusb_verify.h": "061205bd8a55fd7134436bef64147100769a4ee4f15cef123f3b513c62b57514",
+  "src/device/dcd.h": "baf785f2d5d8e3f74bd6d6a04559fc606d341983aad35aa08e168b452c2750db",
+  "src/device/usbd.h": "2d96013219d47fd60416007a1ae12f067d30d9b18d0ec5ba6ff931845538938e",
+  "src/device/usbd_pvt.h": "3d3bae6a54ac6d677a2fdae156665c760a7f22f7651b34cfaa4460a585964db9",
+  "src/osal/osal.h": "c9bd3d35f7436c47287bc481041f9af6aeec605f1e0291e3a76bd95bfc04f4d9",
+  "src/osal/osal_none.h": "d6eed8e3a3c7a25fc7d57bdded71ce2f56aa82564d7a1dd07cba525239bc1b8f",
+  "src/tusb.h": "e08b91989255a25de82c270fd5620d197035bd83c8d537451aab9b2dcdc6cb58",
+  "src/tusb_option.h": "68b3ac79125d8d5f121f0d365b9bf37b56c3c4ec1057012d55051bda35ce44cf"
+}

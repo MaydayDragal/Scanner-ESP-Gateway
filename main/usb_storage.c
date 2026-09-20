@@ -39,6 +39,7 @@ static bool disconnected;
 static bool task_quiesced;
 static atomic_bool host_configured;
 static atomic_bool usb_writable;
+static atomic_int last_io_error = ESP_OK;
 
 static const tusb_desc_device_t device_descriptor = {
     .bLength = sizeof(tusb_desc_device_t),
@@ -70,9 +71,21 @@ static void storage_event(tinyusb_msc_storage_handle_t handle, tinyusb_msc_event
 {
     (void)handle;
     (void)arg;
-    if (event->id == TINYUSB_MSC_EVENT_MOUNT_START) return;
-    mount_event = *event;
-    xSemaphoreGive(mount_done);
+    switch (event->id) {
+    case TINYUSB_MSC_EVENT_IO_ERROR:
+        atomic_store(&last_io_error, event->io_error.error);
+        break;
+    case TINYUSB_MSC_EVENT_MOUNT_COMPLETE:
+    case TINYUSB_MSC_EVENT_MOUNT_FAILED:
+    case TINYUSB_MSC_EVENT_FORMAT_REQUIRED:
+    case TINYUSB_MSC_EVENT_FORMAT_FAILED:
+        mount_event = *event;
+        xSemaphoreGive(mount_done);
+        break;
+    case TINYUSB_MSC_EVENT_MOUNT_START:
+    default:
+        break;
+    }
 }
 
 static bool app_mounted(void)
@@ -352,4 +365,9 @@ bool usb_storage_app_owned(void)
 bool usb_storage_host_configured(void)
 {
     return ownership.state == STORAGE_USB && atomic_load(&host_configured) && tud_mounted();
+}
+
+esp_err_t usb_storage_last_io_error(void)
+{
+    return atomic_load(&last_io_error);
 }

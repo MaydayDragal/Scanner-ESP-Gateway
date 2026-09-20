@@ -1,6 +1,7 @@
 dependencies:
-  # Preserve dependencies.lock: teardown is verified with esp_tinyusb 2.3.0.
-  espressif/esp_tinyusb: "^2.0.0"
+  espressif/esp_tinyusb:
+    version: "==2.3.0"
+    override_path: "../components/esp_tinyusb"
   espressif/tinyusb: "==0.21.0~2"
   espressif/led_strip: "^3.0.0"
   idf: ">=5.5,<6"

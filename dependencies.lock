@@ -1,17 +1,14 @@
 dependencies:
   espressif/esp_tinyusb:
-    component_hash: 0fab24246e07bdf919c6489d17a590cffbffbbf6a9c44d6235641645c8b946b7
     dependencies:
     - name: idf
-      require: private
       version: '>=5.0'
     - name: espressif/tinyusb
-      registry_url: https://components.espressif.com
-      require: public
+      public: true
       version: '>=0.17.0~2'
     source:
-      registry_url: https://components.espressif.com/
-      type: service
+      path: C:\Scanner ESP Gateway\.worktrees\reliability\components\esp_tinyusb
+      type: local
     targets:
     - esp32s2
     - esp32s3
@@ -54,6 +51,6 @@ direct_dependencies:
 - espressif/led_strip
 - espressif/tinyusb
 - idf
-manifest_hash: 4ae5b90f5516d80f7735376ba84924bdd86d31911e0592c91b6d174f0f58348d
+manifest_hash: b18adf6a007396d5256d7919063c3e7ea2ebb0e77b23d331850345a64703ea3d
 target: esp32s3
 version: 2.0.0

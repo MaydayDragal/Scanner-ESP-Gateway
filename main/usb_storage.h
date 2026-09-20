@@ -15,3 +15,7 @@ bool usb_storage_app_owned(void);
  * ESP_OK means locally ready, with MSC left running for a later connection.
  * This getter reports host configuration, not the Windows volume-mount state. */
 bool usb_storage_host_configured(void);
+
+/* Last physical MSC read/write error since startup, ESP_OK before any error.
+ * Sticky across successful I/O and ownership recovery; safe on either core. */
+esp_err_t usb_storage_last_io_error(void);
