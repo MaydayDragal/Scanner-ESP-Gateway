@@ -34,6 +34,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Scan image verifier tests failed' }
     & $Python (Join-Path $PSScriptRoot 'test_jpeg_width_crop.py')
     if ($LASTEXITCODE -ne 0) { throw 'JPEG width crop tests failed' }
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'test_probe_es60w.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'Legacy scanner probe tests failed' }
 } finally {
     Remove-Item -LiteralPath $binary -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $jpegFixture -Force -ErrorAction SilentlyContinue

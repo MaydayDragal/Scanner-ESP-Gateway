@@ -82,7 +82,7 @@ powershell -ExecutionPolicy Bypass -File tools/migrate_to_usb_msc.ps1 -DriveLett
 
 The preparation step removes `S:` only when it is the legacy `\\192.168.77.1@80\DavWWWRoot` mapping. The administrative step requires proof that the Explorer session was prepared, restores the backed-up `FileSizeLimitInBytes` value without stopping WebClient, and assigns `S:` to the USB device with VID `303A` and PID `4002`. The script refuses to replace any other mapping or local volume. Re-run the preparation step before a later migration attempt. A different target letter still cleans up only the legacy `S:` mapping.
 
-Earlier scanner, MSC, NCM, and WebDAV experiments and their measured hardware results remain in [protocol notes](docs/scanner-protocol-notes.md). On the debug PC, scanner probes must target TP-Link Wi-Fi 2; the older single-adapter probe script interrupts the internet adapter.
+Earlier scanner, MSC, NCM, and WebDAV experiments and their measured hardware results remain in [protocol notes](docs/scanner-protocol-notes.md). The legacy `tools/probe_es60w.ps1` requires `-InterfaceAlias`, `-ScannerSsid`, and `-ScannerPassword`. On the debug PC, select the TP-Link adapter with `-InterfaceAlias 'Wi-Fi 2'`. The probe restores that adapter's original connection, preserves existing profiles, and removes only its unique temporary profile and credential XML. Its native output parser expects English Windows field labels.
 
 ## References
 
