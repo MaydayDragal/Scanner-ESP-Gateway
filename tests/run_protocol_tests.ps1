@@ -20,6 +20,15 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Idle timer test compilation failed' }
     & $binary
     if ($LASTEXITCODE -ne 0) { throw 'Idle timer tests failed' }
+    foreach ($clockMode in 'model', 'missing', 'configured') {
+        $clockFlags = @()
+        if ($clockMode -ne 'model') { $clockFlags += '-DSCANNER_CLOCK_WIFI_BOUNDARY_TEST' }
+        if ($clockMode -eq 'configured') { $clockFlags += '-DSCANNER_CLOCK_TEST_WITH_TIME_CREDENTIALS' }
+        & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror @clockFlags -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_scanner_clock_model.c') (Join-Path $root 'main\scanner_clock_model.c') -o $binary
+        if ($LASTEXITCODE -ne 0) { throw "Clock $clockMode test compilation failed" }
+        & $binary
+        if ($LASTEXITCODE -ne 0) { throw "Clock $clockMode tests failed" }
+    }
     & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_scanner_led_model.c') (Join-Path $root 'main\scanner_led_model.c') -o $binary
     if ($LASTEXITCODE -ne 0) { throw 'LED model test compilation failed' }
     & $binary

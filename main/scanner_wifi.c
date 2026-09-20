@@ -1,14 +1,20 @@
 #include "scanner_wifi.h"
+#include "scanner_clock_model.h"
 
 #include <errno.h>
+#if !defined(SCANNER_WIFI_NATIVE_TEST)
 #include <fcntl.h>
+#endif
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#if !defined(SCANNER_WIFI_NATIVE_TEST)
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
+#if !defined(SCANNER_WIFI_NATIVE_TEST)
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -18,8 +24,12 @@
 #include "freertos/event_groups.h"
 #include "lwip/inet.h"
 #include "nvs_flash.h"
+#include "esp_timer.h"
+#endif
 
-#if __has_include("scanner_wifi_local.h")
+#if defined(SCANNER_WIFI_NATIVE_TEST)
+#define SCANNER_WIFI_CONFIGURED 1
+#elif __has_include("scanner_wifi_local.h")
 #include "scanner_wifi_local.h"
 #define SCANNER_WIFI_CONFIGURED 1
 #else
@@ -52,6 +62,8 @@ static bool connected_to_scanner(void)
 
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
+    (void)arg;
+    (void)data;
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         xEventGroupClearBits(wifi_events, WIFI_CONNECTED_BIT);
         xEventGroupSetBits(wifi_events, WIFI_DISCONNECTED_BIT);
@@ -75,12 +87,21 @@ static void synchronize_clock(void)
         if (esp_netif_sntp_init(&config) == ESP_OK) {
             esp_err_t synced = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(10000));
             time_t now = time(NULL);
+            if (synced != ESP_OK) {
+                scanner_clock_record_sync_failure(SCANNER_CLOCK_ERROR_SNTP_TIMEOUT);
+            } else if (now <= 1704067200) {
+                scanner_clock_record_sync_failure(SCANNER_CLOCK_ERROR_INVALID_TIME);
+            } else {
+                scanner_clock_record_ntp_success(esp_timer_get_time());
+            }
             ESP_LOGI(TAG, "Internet time sync: %s", synced == ESP_OK && now > 1704067200 ? "ready" : "failed");
             esp_netif_sntp_deinit();
         } else {
+            scanner_clock_record_sync_failure(SCANNER_CLOCK_ERROR_SNTP_INIT);
             ESP_LOGW(TAG, "could not start Internet time sync");
         }
     } else {
+        scanner_clock_record_sync_failure(SCANNER_CLOCK_ERROR_HOME_AP_TIMEOUT);
         ESP_LOGW(TAG, "home Wi-Fi time sync connection timed out");
     }
     xEventGroupClearBits(wifi_events, WIFI_CONNECTED_BIT | WIFI_DISCONNECTED_BIT);
@@ -89,10 +110,12 @@ static void synchronize_clock(void)
                         pdMS_TO_TICKS(1000));
     xEventGroupClearBits(wifi_events, WIFI_CONNECTED_BIT | WIFI_DISCONNECTED_BIT);
 #else
+    scanner_clock_record_sync_failure(SCANNER_CLOCK_ERROR_TIME_WIFI_NOT_CONFIGURED);
     ESP_LOGW(TAG, "home Wi-Fi time sync not configured");
 #endif
 }
 
+#if !defined(SCANNER_WIFI_NATIVE_TEST)
 int scanner_wifi_open_connection(uint32_t gateway_ip)
 {
     int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -137,6 +160,13 @@ int scanner_wifi_open_connection(uint32_t gateway_ip)
     return -1;
 }
 #endif
+#else
+int scanner_wifi_open_connection(uint32_t gateway_ip)
+{
+    (void)gateway_ip;
+    return -1;
+}
+#endif
 
 scanner_wifi_result_t scanner_wifi_current(void)
 {
@@ -159,6 +189,7 @@ scanner_wifi_result_t scanner_wifi_start(void)
 {
     scanner_wifi_result_t result = {0};
 #if !SCANNER_WIFI_CONFIGURED
+    scanner_clock_record_sync_failure(SCANNER_CLOCK_ERROR_TIME_WIFI_NOT_CONFIGURED);
     ESP_LOGW(TAG, "scanner_wifi_local.h missing; scanner Wi-Fi is not configured");
     return result;
 #else
