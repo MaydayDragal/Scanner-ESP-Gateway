@@ -5,6 +5,8 @@
  */
 
 #include <string.h>
+#include <stdatomic.h>
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_err.h"
 #include "esp_check.h"
@@ -17,6 +19,7 @@
 #include "vfs_fat_internal.h"
 #include "tinyusb.h"
 #include "device/usbd_pvt.h"
+#include "device/dcd.h"
 #include "class/msc/msc_device.h"
 
 #include "storage_spiflash.h"
@@ -61,6 +64,13 @@ typedef struct {
         BYTE format_flags;                      /*!< Flags for formatting the filesystem, can be 0 to use default settings. */
     } fat_fs;
     uint32_t active_io;                        /*!< Synchronous operations holding or awaiting the storage mutex. */
+    unsigned session_generation;
+    unsigned accepted_generation;
+    atomic_uint released_generation;
+    atomic_bool io_failed;
+    bool removal_prevented;
+    bool eject_accepted;
+    bool status_succeeded;
     SemaphoreHandle_t mux_lock;                 /**< Mutex for storage operations */
 } tinyusb_msc_storage_s;
 
@@ -90,6 +100,24 @@ typedef struct {
 } tinyusb_msc_driver_t;
 
 static tinyusb_msc_driver_t *p_msc_driver;
+
+/* The ISR never dereferences driver/storage lifetime or takes a task mutex.
+ * Generation equality is the sole validity test for task-published evidence. */
+_Static_assert(ATOMIC_INT_LOCK_FREE == 2, "USB reset generation must be lock-free");
+static atomic_uint bus_generation = 1;
+
+void IRAM_ATTR tinyusb_msc_invalidate_session(void)
+{
+    atomic_fetch_add_explicit(&bus_generation, 1, memory_order_acq_rel);
+}
+
+void IRAM_ATTR tud_event_hook_cb(uint8_t rhport, uint32_t eventid, bool in_isr)
+{
+    (void)rhport;
+    (void)in_isr;
+    if (eventid == DCD_EVENT_BUS_RESET || eventid == DCD_EVENT_UNPLUGGED)
+        tinyusb_msc_invalidate_session();
+}
 
 static portMUX_TYPE msc_lock = portMUX_INITIALIZER_UNLOCKED;
 #define MSC_ENTER_CRITICAL()   portENTER_CRITICAL(&msc_lock)
@@ -148,6 +176,8 @@ static void tinyusb_io_error_cb(uint8_t lun, tinyusb_msc_io_operation_t operatio
         .io_error = {.lun = lun, .operation = operation, .error = error},
     };
     MSC_EXIT_CRITICAL();
+    if (storage) atomic_store(&storage->io_failed, true);
+    tinyusb_msc_invalidate_session();
     if (cb) cb((tinyusb_msc_storage_handle_t)storage, &event, arg);
 }
 
@@ -168,7 +198,7 @@ static void tinyusb_io_error_cb(uint8_t lun, tinyusb_msc_io_operation_t operatio
  */
 static inline bool _msc_storage_get_by_lun(uint8_t lun, msc_storage_obj_t **storage)
 {
-    if ((lun < TINYUSB_MSC_STORAGE_MAX_LUNS) &&
+    if (p_msc_driver && (lun < TINYUSB_MSC_STORAGE_MAX_LUNS) &&
             (p_msc_driver->dynamic.storage[lun] != NULL)) {
         *storage = p_msc_driver->dynamic.storage[lun];
         return true;
@@ -430,10 +460,6 @@ static esp_err_t msc_storage_mount(msc_storage_obj_t *storage)
         goto exit;
     }
 
-    // Registering the FATFS object was done successfully; change the mount point.
-    // All subsequent errors depend on the filesystem.
-    storage->mount_point = TINYUSB_MSC_STORAGE_MOUNT_APP;
-
     ret = vfs_fat_mount(drv, fs, true);
     if (ret == ESP_ERR_NOT_FOUND) {
         // If mount failed, try to format the drive
@@ -441,7 +467,6 @@ static esp_err_t msc_storage_mount(msc_storage_obj_t *storage)
             xSemaphoreGive(storage->mux_lock);
             ESP_LOGE(TAG, "Mount failed and do not format is set");
             tinyusb_event_cb(storage, TINYUSB_MSC_EVENT_FORMAT_REQUIRED);
-            ret = ESP_OK;
             goto exit;
         }
         ESP_LOGW(TAG, "Mount failed, trying to format the drive");
@@ -454,6 +479,7 @@ static esp_err_t msc_storage_mount(msc_storage_obj_t *storage)
         goto fail;
     }
 
+    storage->mount_point = TINYUSB_MSC_STORAGE_MOUNT_APP;
     xSemaphoreGive(storage->mux_lock);
     tinyusb_event_cb(storage, TINYUSB_MSC_EVENT_MOUNT_COMPLETE);
     return ESP_OK;
@@ -499,7 +525,7 @@ static esp_err_t msc_storage_unmount(msc_storage_obj_t *storage)
     }
     // Unregister FATFS object from VFS
     ret = esp_vfs_fat_unregister_path(storage->fat_fs.base_path);
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
         xSemaphoreGive(storage->mux_lock);
         ESP_LOGE(TAG, "Failed to unregister VFS FAT");
         return ret;
@@ -909,6 +935,8 @@ esp_err_t tinyusb_msc_delete_storage(tinyusb_msc_storage_handle_t handle)
 {
     ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "Storage handle can't be NULL");
     msc_storage_obj_t *storage = (msc_storage_obj_t *)handle;
+
+    ESP_RETURN_ON_FALSE(storage != NULL, ESP_ERR_INVALID_ARG, TAG, "Storage handle can't be NULL");
     bool no_more_luns = false;
 
     MSC_ENTER_CRITICAL();
@@ -975,6 +1003,10 @@ esp_err_t tinyusb_msc_set_storage_mount_point(tinyusb_msc_storage_handle_t handl
                                               tinyusb_msc_mount_point_t mount_point)
 {
     ESP_RETURN_ON_FALSE(p_msc_driver != NULL, ESP_ERR_INVALID_STATE, TAG, "MSC driver is not initialized");
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "Storage handle can't be NULL");
+    ESP_RETURN_ON_FALSE(mount_point == TINYUSB_MSC_STORAGE_MOUNT_APP ||
+                        mount_point == TINYUSB_MSC_STORAGE_MOUNT_USB,
+                        ESP_ERR_INVALID_ARG, TAG, "Invalid mount point");
 
     msc_storage_obj_t *storage = (msc_storage_obj_t *)handle;
 
@@ -985,14 +1017,11 @@ esp_err_t tinyusb_msc_set_storage_mount_point(tinyusb_msc_storage_handle_t handl
 
     if (mount_point == TINYUSB_MSC_STORAGE_MOUNT_APP) {
         // If the storage is mounted to application, mount it
-        msc_storage_mount(storage);
+        return msc_storage_mount(storage);
     } else {
         // If the storage is mounted to USB host, unmount it
-        msc_storage_unmount(storage);
+        return msc_storage_unmount(storage);
     }
-    storage->mount_point = mount_point;
-
-    return ESP_OK;
 }
 
 esp_err_t tinyusb_msc_config_storage_fat_fs(tinyusb_msc_storage_handle_t handle,
@@ -1093,6 +1122,55 @@ esp_err_t tinyusb_msc_format_storage(tinyusb_msc_storage_handle_t handle)
 #define SCSI_CODE_ASC_INVALID_COMMAND_OPERATION_CODE    0x20 /** SCSI ASC code for 'INVALID COMMAND OPERATION CODE' **/
 #define SCSI_CODE_ASCQ                                  0x00
 
+static msc_storage_obj_t *session_storage(uint8_t lun)
+{
+    msc_storage_obj_t *storage = NULL;
+    MSC_ENTER_CRITICAL();
+    _msc_storage_get_by_lun(lun, &storage);
+    MSC_EXIT_CRITICAL();
+    if (!storage) return NULL;
+    unsigned generation = atomic_load(&bus_generation);
+    if (storage->session_generation != generation) {
+        storage->session_generation = generation;
+        storage->accepted_generation = 0;
+        storage->removal_prevented = false;
+        storage->eject_accepted = false;
+        storage->status_succeeded = false;
+        atomic_store(&storage->released_generation, 0);
+    }
+    return storage;
+}
+
+bool tinyusb_msc_host_released(tinyusb_msc_storage_handle_t handle)
+{
+    msc_storage_obj_t *storage = (msc_storage_obj_t *)handle;
+    return storage && !atomic_load(&storage->io_failed) &&
+           atomic_load(&storage->released_generation) == atomic_load(&bus_generation);
+}
+
+/* Called by the pinned core status extension before its ordinary complete
+ * callback. A rejected command or failed/short/aborted CSW cannot release. */
+void tinyusb_msc_command_status_cb(uint8_t lun, uint8_t const command[16], bool success)
+{
+    msc_storage_obj_t *storage = session_storage(lun);
+    if (!storage || command[0] != SCSI_CMD_START_STOP_UNIT) return;
+    storage->status_succeeded = success && storage->eject_accepted &&
+                               storage->accepted_generation == atomic_load(&bus_generation);
+    if (!success) storage->accepted_generation = 0;
+}
+
+void tud_msc_scsi_complete_cb(uint8_t lun, uint8_t const command[16])
+{
+    msc_storage_obj_t *storage = session_storage(lun);
+    if (storage && command[0] == SCSI_CMD_START_STOP_UNIT &&
+        (command[4] & 3) == 2 && storage->status_succeeded &&
+        storage->accepted_generation == atomic_load(&bus_generation) &&
+        !atomic_load(&storage->io_failed)) {
+        atomic_store(&storage->released_generation, storage->accepted_generation);
+    }
+    if (storage) storage->status_succeeded = false;
+}
+
 // Invoked when received GET_MAX_LUN request, required for multiple LUNs implementation
 uint8_t tud_msc_get_maxlun_cb(void)
 {
@@ -1125,13 +1203,8 @@ void tud_msc_inquiry_cb(uint8_t lun, uint8_t vendor_id[8], uint8_t product_id[16
 // return true allowing host to read/write this LUN e.g SD card inserted
 bool tud_msc_test_unit_ready_cb(uint8_t lun)
 {
-    msc_storage_obj_t *storage = NULL;
-
-    MSC_ENTER_CRITICAL();
-    bool found = _msc_storage_get_by_lun(lun, &storage);
-    MSC_EXIT_CRITICAL();
-
-    if (found && (storage != NULL) && (storage->mount_point == TINYUSB_MSC_STORAGE_MOUNT_USB)) {
+    msc_storage_obj_t *storage = session_storage(lun);
+    if (storage && !storage->eject_accepted && storage->mount_point == TINYUSB_MSC_STORAGE_MOUNT_USB) {
         // Storage media is ready for access by USB host
         return true;
     }
@@ -1168,13 +1241,29 @@ void tud_msc_capacity_cb(uint8_t lun, uint32_t *block_count, uint16_t *block_siz
 // - Start = 1 : active mode, if load_eject = 1 : load disk storage
 bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, bool load_eject)
 {
-    (void) lun;
     (void) power_condition;
-
+    msc_storage_obj_t *storage = session_storage(lun);
+    if (!storage || storage->mount_point != TINYUSB_MSC_STORAGE_MOUNT_USB) return false;
     if (load_eject && !start) {
-        // Eject media from the storage
-        msc_storage_mount_to_app();
+        if (storage->removal_prevented || storage->eject_accepted || atomic_load(&storage->io_failed)) {
+            tud_msc_set_sense(lun, SCSI_SENSE_ILLEGAL_REQUEST, 0x53, 0x02);
+            storage->accepted_generation = 0;
+            storage->status_succeeded = false;
+            return false;
+        }
+        storage->eject_accepted = true;
+        storage->accepted_generation = storage->session_generation;
+        storage->status_succeeded = false;
     }
+    return true;
+}
+
+bool tud_msc_prevent_allow_medium_removal_cb(uint8_t lun, uint8_t prohibit_removal, uint8_t control)
+{
+    (void)control;
+    msc_storage_obj_t *storage = session_storage(lun);
+    if (!storage || storage->eject_accepted || prohibit_removal > 1) return false;
+    storage->removal_prevented = prohibit_removal != 0;
     return true;
 }
 
@@ -1183,6 +1272,7 @@ bool tud_msc_start_stop_cb(uint8_t lun, uint8_t power_condition, bool start, boo
 // - Application fill the buffer (up to bufsize) with address contents and return number of read byte.
 int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buffer, uint32_t bufsize)
 {
+    if (!tud_msc_test_unit_ready_cb(lun)) return TUD_MSC_RET_ERROR;
     esp_err_t err = msc_storage_read_sector(lun, lba, offset, bufsize, buffer);
     if (err != ESP_OK) {
         tinyusb_io_error_cb(lun, TINYUSB_MSC_IO_READ, err);
@@ -1197,6 +1287,11 @@ int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buff
 // - Application write data from buffer to address contents (up to bufsize) and return number of written byte.
 int32_t tud_msc_write10_cb(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t *buffer, uint32_t bufsize)
 {
+    msc_storage_obj_t *storage = session_storage(lun);
+    if (storage && (!tud_msc_test_unit_ready_cb(lun) || !tud_msc_is_writable_cb(lun))) {
+        tud_msc_set_sense(lun, SCSI_SENSE_DATA_PROTECT, 0x27, 0);
+        return TUD_MSC_RET_ERROR;
+    }
     /* TinyUSB owns buffer until this callback returns. No copied buffer or
      * deferred job may survive the acknowledged task quiescence boundary. */
     esp_err_t err = bufsize > MSC_STORAGE_BUFFER_SIZE ? ESP_ERR_INVALID_SIZE :
@@ -1229,12 +1324,17 @@ int32_t tud_msc_scsi_cb(uint8_t lun, uint8_t const scsi_cmd[16], void *buffer, u
     int32_t ret;
 
     switch (scsi_cmd[0]) {
-    case SCSI_CMD_PREVENT_ALLOW_MEDIUM_REMOVAL:
-        /* SCSI_CMD_PREVENT_ALLOW_MEDIUM_REMOVAL is the Prevent/Allow Medium Removal
-        command (1Eh) that requests the library to enable or disable user access to
-        the storage media/partition. */
-        ret = 0;
+    case 0x35: { /* SYNCHRONIZE CACHE(10): all writes above complete physically.
+                  * This barrier neither ejects nor clears a prior I/O fault. */
+        msc_storage_obj_t *storage = session_storage(lun);
+        if (!storage || !tud_msc_test_unit_ready_cb(lun)) return TUD_MSC_RET_ERROR;
+        xSemaphoreTake(storage->mux_lock, portMAX_DELAY);
+        bool failed = atomic_load(&storage->io_failed);
+        xSemaphoreGive(storage->mux_lock);
+        if (failed) tud_msc_set_sense(lun, SCSI_SENSE_MEDIUM_ERROR, 0x0C, 0);
+        ret = failed ? TUD_MSC_RET_ERROR : 0;
         break;
+    }
     default:
         ESP_LOGW(TAG, "tud_msc_scsi_cb() invoked: %d", scsi_cmd[0]);
         tud_msc_set_sense(lun, SCSI_SENSE_ILLEGAL_REQUEST, SCSI_CODE_ASC_INVALID_COMMAND_OPERATION_CODE, SCSI_CODE_ASCQ);

@@ -32,12 +32,13 @@ static esp_err_t storage_sdmmc_unmount(void)
     BYTE pdrv;
     pdrv = ff_diskio_get_pdrv_card(_scard);
     if (pdrv == 0xff) {
-        ESP_LOGE(TAG, "Invalid state");
-        return ESP_ERR_INVALID_STATE;
+        /* A prior stopped cleanup or partial unmount already removed it. */
+        ESP_LOGD(TAG, "SD medium already unmounted");
+        return ESP_OK;
     }
 
     char drv[3] = {(char)('0' + pdrv), ':', 0};
-    f_mount(0, drv, 0);
+    if (f_mount(0, drv, 0) != FR_OK) return ESP_FAIL;
     ff_diskio_unregister(pdrv);
 
     return ESP_OK;

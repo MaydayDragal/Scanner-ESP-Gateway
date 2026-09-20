@@ -40,6 +40,7 @@ static bool task_quiesced;
 static atomic_bool host_configured;
 static atomic_bool usb_writable;
 static atomic_int last_io_error = ESP_OK;
+static storage_mode_t mode = STORAGE_AUTO_RO;
 
 static const tusb_desc_device_t device_descriptor = {
     .bLength = sizeof(tusb_desc_device_t),
@@ -116,6 +117,7 @@ static void usb_event(tinyusb_event_t *event, void *arg)
 {
     (void)arg;
     if (event->id == TINYUSB_EVENT_ATTACHED || event->id == TINYUSB_EVENT_DETACHED) {
+        tinyusb_msc_invalidate_session();
         atomic_store(&host_configured, event->id == TINYUSB_EVENT_ATTACHED);
         xSemaphoreGive(host_changed);
     }
@@ -152,6 +154,7 @@ static esp_err_t wait_host_configuration(void)
 static esp_err_t install_usb(void)
 {
     if (driver_installed || driver_uncertain || tud_inited()) return ESP_ERR_INVALID_STATE;
+    tinyusb_msc_invalidate_session();
     usb_config = (tinyusb_config_t)TINYUSB_DEFAULT_CONFIG();
     usb_config.descriptor.device = &device_descriptor;
     usb_config.descriptor.full_speed_config = configuration_descriptor;
@@ -234,8 +237,7 @@ static esp_err_t uninstall_usb(void)
     return err;
 }
 
-/* The 2.3.0 setter overwrites its owner even when unmount fails. Recovery
- * therefore also removes any residual FATFS registration with USB stopped.
+/* Recovery removes any residual FATFS registration with USB stopped.
  * This never mounts or formats a filesystem. */
 static esp_err_t remove_app_mount(void)
 {
@@ -291,11 +293,17 @@ esp_err_t usb_storage_start_app(void)
             .config = {.format_if_mount_failed = false, .max_files = 10},
             .do_not_format = true,
         },
-        .mount_point = TINYUSB_MSC_STORAGE_MOUNT_APP,
+        .mount_point = TINYUSB_MSC_STORAGE_MOUNT_USB,
     };
     err = tinyusb_msc_new_storage_sdmmc(&config, &storage);
-    if (err == ESP_OK) err = wait_mount(TINYUSB_MSC_STORAGE_MOUNT_APP);
+    if (err == ESP_OK) err = set_mount(TINYUSB_MSC_STORAGE_MOUNT_APP);
     if (err == ESP_OK) ownership.state = STORAGE_APP;
+    else if (storage) {
+        /* Keep the original mount error visible. Recovery is raw read-only
+         * access, and is attempted only after stopped-transport cleanup. */
+        mode = STORAGE_RECOVERY_RO;
+        (void)usb_storage_restore_usb();
+    }
     return err;
 }
 
@@ -303,7 +311,7 @@ esp_err_t usb_storage_expose(void)
 {
     if (!storage || !storage_handoff_begin_to_usb(&ownership)) return ESP_ERR_INVALID_STATE;
     esp_err_t err = set_mount(TINYUSB_MSC_STORAGE_MOUNT_USB);
-    if (err == ESP_OK) atomic_store(&usb_writable, true);
+    if (err == ESP_OK) atomic_store(&usb_writable, mode == STORAGE_MAINTENANCE_RW);
     if (err == ESP_OK) err = install_usb();
     if (err != ESP_OK) atomic_store(&usb_writable, false);
     storage_handoff_complete_to_usb(&ownership, err == ESP_OK);
@@ -316,6 +324,7 @@ esp_err_t usb_storage_expose(void)
 
 esp_err_t usb_storage_acquire(void)
 {
+    if (mode != STORAGE_AUTO_RO) return ESP_ERR_INVALID_STATE;
     if (!storage || !storage_handoff_begin_to_app(&ownership)) return ESP_ERR_INVALID_STATE;
     atomic_store(&usb_writable, false);
     esp_err_t err = disconnect_usb();
@@ -347,7 +356,8 @@ esp_err_t usb_storage_restore_usb(void)
         if (err == ESP_OK && (point != TINYUSB_MSC_STORAGE_MOUNT_USB || app_mounted())) err = ESP_FAIL;
     }
     if (err == ESP_OK) {
-        atomic_store(&usb_writable, true);
+        mode = STORAGE_RECOVERY_RO;
+        atomic_store(&usb_writable, false);
         err = install_usb();
     }
     if (err != ESP_OK) atomic_store(&usb_writable, false);
@@ -370,4 +380,56 @@ bool usb_storage_host_configured(void)
 esp_err_t usb_storage_last_io_error(void)
 {
     return atomic_load(&last_io_error);
+}
+
+storage_mode_t usb_storage_mode(void) { return mode; }
+
+bool usb_storage_capture_allowed(void)
+{
+    return storage_mode_can_capture(mode, ownership.state == STORAGE_USB);
+}
+
+bool usb_storage_transport_ready(void) { return ownership.state == STORAGE_USB; }
+
+bool usb_storage_host_released(void)
+{
+    return storage && ownership.state == STORAGE_USB &&
+           usb_storage_last_io_error() == ESP_OK && tinyusb_msc_host_released(storage);
+}
+
+esp_err_t usb_storage_enter_maintenance(void)
+{
+    if (!storage_mode_can_enter_maintenance(mode, ownership.state == STORAGE_USB &&
+                                            usb_storage_last_io_error() == ESP_OK))
+        return ESP_ERR_INVALID_STATE;
+    ownership.state = STORAGE_TO_USB;
+    esp_err_t err = disconnect_usb();
+    if (err == ESP_OK) err = uninstall_usb();
+    if (err == ESP_OK) {
+        mode = STORAGE_MAINTENANCE_RW;
+        atomic_store(&usb_writable, true);
+        err = install_usb();
+    }
+    if (err != ESP_OK) atomic_store(&usb_writable, false);
+    storage_handoff_complete_to_usb(&ownership, err == ESP_OK);
+    return err;
+}
+
+esp_err_t usb_storage_resume_automatic(void)
+{
+    if (!storage_mode_can_resume(mode, usb_storage_host_released(),
+                                 usb_storage_last_io_error() == ESP_OK))
+        return ESP_ERR_INVALID_STATE;
+    if (!storage_handoff_begin_to_app(&ownership)) return ESP_ERR_INVALID_STATE;
+    atomic_store(&usb_writable, false);
+    esp_err_t err = disconnect_usb();
+    /* An ISR reset may arrive while we wait for the parked task. Preserve
+     * the session evidence until this final check, before teardown/mount. */
+    if (err == ESP_OK && !tinyusb_msc_host_released(storage)) err = ESP_ERR_INVALID_STATE;
+    if (err == ESP_OK) err = uninstall_usb();
+    if (err == ESP_OK) err = set_mount(TINYUSB_MSC_STORAGE_MOUNT_APP);
+    storage_handoff_complete_to_app(&ownership, err == ESP_OK);
+    if (err != ESP_OK) return err;
+    mode = STORAGE_AUTO_RO;
+    return usb_storage_expose();
 }

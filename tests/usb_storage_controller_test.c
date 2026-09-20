@@ -16,3 +16,10 @@ bool test_is_disconnect_callback(void (*callback)(void *))
 {
     return callback == disconnect_device;
 }
+
+esp_err_t test_transport_stop(void)
+{
+    esp_err_t err = disconnect_usb();
+    if (err == ESP_OK) err = uninstall_usb();
+    return err;
+}

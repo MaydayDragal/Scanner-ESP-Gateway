@@ -51,6 +51,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Storage handoff model tests failed' }
     & $Python (Join-Path $PSScriptRoot 'run_usb_storage_tests.py')
     if ($LASTEXITCODE -ne 0) { throw 'USB storage lifecycle tests failed' }
+    & $Python (Join-Path $PSScriptRoot 'run_storage_mode_tests.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Storage mode and BOOT input tests failed' }
     & $Python (Join-Path $PSScriptRoot 'test_verify_scan.py')
     if ($LASTEXITCODE -ne 0) { throw 'Scan image verifier tests failed' }
     & $Python (Join-Path $PSScriptRoot 'test_jpeg_width_crop.py')

@@ -119,3 +119,33 @@ idf_component_register(SRCS ${srcs}
 # Pass tusb_config.h from this component to TinyUSB
 idf_component_get_property(tusb_lib ${tinyusb_name} COMPONENT_LIB)
 target_include_directories(${tusb_lib} PRIVATE "include")
+
+# Preserve the exact managed package. Compile a deterministic, hash-checked MSC
+# copy with command-status observation; host tests run this same transformation.
+if(CONFIG_TINYUSB_MSC_ENABLED)
+    idf_component_get_property(tinyusb_dir ${tinyusb_name} COMPONENT_DIR)
+    idf_build_get_property(patch_python PYTHON)
+    set(msc_upstream "${tinyusb_dir}/src/class/msc/msc_device.c")
+    set(msc_patched "${CMAKE_CURRENT_BINARY_DIR}/scanner_msc_device.c")
+    set(msc_patch "${CMAKE_CURRENT_LIST_DIR}/patch_msc_core.py")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${msc_upstream}" "${msc_patch}")
+    execute_process(COMMAND "${patch_python}" "${msc_patch}" "${msc_upstream}" "${msc_patched}"
+                    RESULT_VARIABLE msc_patch_result)
+    if(NOT msc_patch_result EQUAL 0)
+        message(FATAL_ERROR "Pinned TinyUSB MSC status patch failed")
+    endif()
+    get_target_property(msc_core_sources ${tusb_lib} SOURCES)
+    set(msc_replaced 0)
+    set(msc_retained_sources "")
+    foreach(msc_source IN LISTS msc_core_sources)
+        if(msc_source MATCHES "(^|/)src/class/msc/msc_device\\.c$")
+            math(EXPR msc_replaced "${msc_replaced} + 1")
+        else()
+            list(APPEND msc_retained_sources "${msc_source}")
+        endif()
+    endforeach()
+    if(NOT msc_replaced EQUAL 1)
+        message(FATAL_ERROR "Expected exactly one pinned TinyUSB MSC compile unit")
+    endif()
+    set_property(TARGET ${tusb_lib} PROPERTY SOURCES "${msc_retained_sources};${msc_patched}")
+endif()

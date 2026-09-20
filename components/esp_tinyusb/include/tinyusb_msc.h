@@ -249,8 +249,7 @@ esp_err_t tinyusb_msc_config_storage_fat_fs(tinyusb_msc_storage_handle_t handle,
  * This function requests switching storage ownership between the application
  * and the USB host.
  *
- * @note This function does not propagate failures from the internal
- *       mount/unmount helpers to the caller.
+ * @note Helper failures are returned and the prior owner is retained.
  *
  * @param[in] handle Storage handle returned by a storage creation function.
  * @param[in] mount_point Requested mount point.
@@ -303,6 +302,12 @@ esp_err_t tinyusb_msc_get_storage_sector_size(tinyusb_msc_storage_handle_t handl
  */
 esp_err_t tinyusb_msc_get_storage_mount_point(tinyusb_msc_storage_handle_t handle,
                                               tinyusb_msc_mount_point_t *mount_point);
+
+/* Narrow pinned-stack extension. Invalidation is lock-free and ISR-safe;
+ * it never accesses storage lifetime. Release requires a successful eject
+ * command AND successful CSW transfer in the current bus generation. */
+void tinyusb_msc_invalidate_session(void);
+bool tinyusb_msc_host_released(tinyusb_msc_storage_handle_t handle);
 
 #ifdef __cplusplus
 }
