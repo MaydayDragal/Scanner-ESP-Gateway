@@ -16,6 +16,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Display model test compilation failed' }
     & $binary
     if ($LASTEXITCODE -ne 0) { throw 'Display model tests failed' }
+    & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_scanner_idle_model.c') (Join-Path $root 'main\scanner_idle_model.c') -o $binary
+    if ($LASTEXITCODE -ne 0) { throw 'Idle timer test compilation failed' }
+    & $binary
+    if ($LASTEXITCODE -ne 0) { throw 'Idle timer tests failed' }
     & $Python -m ziglang cc -std=c11 -Wall -Wextra -Werror -I (Join-Path $root 'main') (Join-Path $PSScriptRoot 'test_scanner_led_model.c') (Join-Path $root 'main\scanner_led_model.c') -o $binary
     if ($LASTEXITCODE -ne 0) { throw 'LED model test compilation failed' }
     & $binary

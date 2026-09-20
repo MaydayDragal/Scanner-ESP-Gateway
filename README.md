@@ -26,6 +26,8 @@ Current settings are **300 dpi RGB, scanner JPEG quality 75**, using a 2550 x 42
 
 The onboard 320 x 172 landscape display shows scanner connection, feeder and low-battery status, the current action, received MiB during capture, the last saved filename, size, duration, and the active scan settings. Display initialization or transfer failure is logged and scanning continues headless.
 
+After five minutes without a page or scanner-status change, the display and status LED turn off. The gateway keeps checking the feeder and wakes both indicators when a page is inserted or scanner status changes.
+
 The onboard RGB status LED mirrors the same state: white while starting, yellow while reconnecting or unavailable, green while ready, cyan when paper is detected, blue while scanning, bright green after completion, red after failure, and orange for a low-battery warning. This board uses RGB wire order; the green ready state was verified on the device. LED failure does not stop the gateway.
 
 ## Verification

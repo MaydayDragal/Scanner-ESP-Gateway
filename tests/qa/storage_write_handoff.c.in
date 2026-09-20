@@ -1,0 +1,231 @@
+#include "usb_storage_test_stubs.h"
+#include "usb_storage.h"
+#include <assert.h>
+#include <setjmp.h>
+#include <stdio.h>
+#include <string.h>
+
+static int semaphores[8], semaphore_count;
+static TickType_t now;
+static bool app, usb, configured, connected, parked, read_lock, permit_callback=true;
+static int uninstalls, enum_waits, context;
+static jmp_buf task_park;
+static void (*pending)(void *);
+static void *pending_arg;
+static void (*queue[16])(void *);
+static void *queue_args[16];
+static int queue_count;
+static tinyusb_config_t driver;
+static tinyusb_msc_driver_config_t msc;
+static tinyusb_msc_mount_point_t mount_point;
+static const char *scenario;
+
+#include <inttypes.h>
+#define MSC_STORAGE_BUFFER_SIZE 512
+#define MSC_ENTER_CRITICAL() ((void)0)
+#define MSC_EXIT_CRITICAL() ((void)0)
+#define portMAX_DELAY 0xffffffffu
+#define ESP_ERR_NOT_FOUND 10
+#define ESP_ERR_INVALID_SIZE 11
+#define STORAGE_MEDIUM_TYPE_SPIFLASH 1
+#define SCSI_SENSE_ILLEGAL_REQUEST 5
+#define SCSI_CODE_ASC_INVALID_COMMAND_OPERATION_CODE 0x20
+#define SCSI_CODE_ASCQ 0
+#define __builtin_umul_overflow __builtin_mul_overflow
+#define __builtin_uadd_overflow __builtin_add_overflow
+#define ESP_RETURN_ON_FALSE(c,e,...) do { if(!(c)) return (e); } while(0)
+static const char *TAG="dependency";
+static int physical_writes,accepted_bytes,medium_lock=1;
+static bool fail_sd;
+static esp_err_t medium_write(uint32_t l,uint32_t o,size_t s,const void *v) { (void)l;(void)o;(void)s;(void)v;physical_writes++;return fail_sd?ESP_FAIL:ESP_OK; }
+typedef struct { int type;esp_err_t (*write)(uint32_t,uint32_t,size_t,const void *); } medium_t;
+typedef struct { const medium_t *medium;uint32_t sector_size;struct { uint8_t data_buffer[512];uint8_t lun;uint32_t lba,offset,bufsize; } storage_buffer;uint32_t deffered_writes;SemaphoreHandle_t mux_lock; } msc_storage_obj_t;
+static const medium_t medium={.type=0,.write=medium_write};
+static msc_storage_obj_t qa_storage={.medium=&medium,.sector_size=512,.mux_lock=&medium_lock};
+static bool _msc_storage_get_by_lun(uint8_t l,msc_storage_obj_t **o) { if(l)return false;*o=&qa_storage;return true; }
+static void tud_msc_set_sense(uint8_t l,int s,int a,int q) { (void)l;(void)s;(void)a;(void)q; }
+@@msc_storage_write_sector@@
+
+@@tusb_write_func@@
+
+@@msc_storage_write_sector_deferred@@
+
+@@tud_msc_write10_cb@@
+static void host_write_event(void *arg) { (void)arg;uint8_t buffer[512]={0};accepted_bytes=tud_msc_write10_cb(0,100,0,buffer,sizeof(buffer)); }
+
+extern bool tud_msc_is_writable_cb(uint8_t lun);
+
+const char *esp_err_to_name(esp_err_t err) { (void)err; return "test error"; }
+void test_log(const char *tag, const char *format, ...) { (void)tag; (void)format; }
+SemaphoreHandle_t xSemaphoreCreateBinary(void) { return &semaphores[semaphore_count++]; }
+BaseType_t xSemaphoreGive(SemaphoreHandle_t sem) { *(int *)sem=1; return pdTRUE; }
+static void event(int id)
+{
+    configured=id==TINYUSB_EVENT_ATTACHED;
+    tinyusb_event_t data={.id=id};
+    if(driver.event_cb) driver.event_cb(&data,driver.event_arg);
+}
+static void dispatch_pending(void)
+{
+    context=2;
+    if(setjmp(task_park)==0) {
+        while(queue_count) {
+            void (*callback)(void *)=queue[0];void *arg=queue_args[0];queue_count--;
+            memmove(queue,queue+1,sizeof(queue[0])*queue_count);
+            memmove(queue_args,queue_args+1,sizeof(queue_args[0])*queue_count);
+            pending=queue_count?queue[0]:NULL;callback(arg);
+        }
+    }
+    context=0;
+}
+BaseType_t xSemaphoreTake(SemaphoreHandle_t sem, TickType_t ticks)
+{
+    if(!*(int *)sem && ticks && pending && permit_callback) dispatch_pending();
+    if(!*(int *)sem && ticks && usb && !pending && !parked) {
+        enum_waits++;
+        if(!strcmp(scenario,"enumerated")) {
+            connected=true;
+            event(TINYUSB_EVENT_ATTACHED);
+        }
+    }
+    if(*(int *)sem) { *(int *)sem=0; return pdTRUE; }
+    now+=ticks;
+    return 0;
+}
+BaseType_t xTaskCreate(void (*function)(void *),const char *name,unsigned stack,void *arg,unsigned priority,TaskHandle_t *handle)
+{
+    (void)name; (void)stack; (void)priority;
+    *handle=(void *)1;
+    context=1;
+    if(setjmp(task_park)==0) function(arg);
+    context=0;
+    return pdPASS;
+}
+void vTaskSuspend(TaskHandle_t task)
+{
+    (void)task;
+    if(context==2) parked=true;
+    longjmp(task_park,1);
+}
+void vTaskDelete(TaskHandle_t task) { (void)task; }
+void vTaskDelay(TickType_t ticks) { now+=ticks; }
+TickType_t xTaskGetTickCount(void) { return now; }
+int stat(const char *path,struct stat *info) { (void)path; info->st_mode=1; return app?0:-1; }
+int f_mount(void *fs,const char *drive,int immediate) { (void)fs; (void)drive; (void)immediate; return FR_OK; }
+BYTE ff_diskio_get_pdrv_card(const void *card) { (void)card; return 0; }
+void ff_diskio_unregister(BYTE drive) { (void)drive; }
+esp_err_t esp_vfs_fat_unregister_path(const char *path) { (void)path; app=false; return ESP_OK; }
+esp_err_t sdmmc_host_init(void) { return ESP_OK; }
+esp_err_t sdmmc_host_init_slot(int slot,const sdmmc_slot_config_t *config) { (void)slot; assert(config->width==4); return ESP_OK; }
+esp_err_t sdmmc_card_init(const sdmmc_host_t *host,sdmmc_card_t *card) { (void)host; (void)card; return ESP_OK; }
+void sdmmc_card_print_info(void *stream,const sdmmc_card_t *card) { (void)stream; (void)card; }
+esp_err_t tinyusb_driver_install(const tinyusb_config_t *config)
+{
+    assert(!app && !usb);
+    assert(tud_msc_is_writable_cb(0) && "USB-owned card must accept host writes");
+    assert(!tud_msc_is_writable_cb(1) && "Only the configured LUN is writable");
+    driver=*config; usb=true; parked=false;
+    configured=false; connected=!strcmp(scenario,"enumeration_timeout");
+    return ESP_OK;
+}
+esp_err_t tinyusb_driver_uninstall(void)
+{
+    uninstalls++;
+    assert(parked && !read_lock && "Uninstall requires quiescent MSC task");
+    usb=false;pending=NULL;queue_count=0;event(TINYUSB_EVENT_DETACHED);
+    return ESP_OK;
+}
+bool tud_inited(void) { return usb; }
+bool tud_disconnect(void) { connected=false; return true; }
+bool tud_connected(void) { return connected; }
+bool tud_mounted(void) { return configured; }
+void usbd_defer_func(void (*callback)(void *),void *arg,bool in_isr)
+{
+    assert(!in_isr);
+    assert(!parked && "Do not enqueue into an already parked task");
+    queue[queue_count]=callback;queue_args[queue_count++]=arg;pending=queue[0];pending_arg=arg;
+}
+esp_err_t tinyusb_msc_install_driver(const tinyusb_msc_driver_config_t *config) { msc=*config; assert(msc.user_flags.auto_mount_off); return ESP_OK; }
+static void mount_to(tinyusb_msc_mount_point_t point)
+{
+    if(point==TINYUSB_MSC_STORAGE_MOUNT_APP) assert(!usb && !read_lock);
+    mount_point=point; app=point==TINYUSB_MSC_STORAGE_MOUNT_APP;
+    tinyusb_msc_event_t data={.id=TINYUSB_MSC_EVENT_MOUNT_COMPLETE,.mount_point=point};
+    msc.callback((void *)1,&data,NULL);
+}
+esp_err_t tinyusb_msc_new_storage_sdmmc(const tinyusb_msc_storage_config_t *config,tinyusb_msc_storage_handle_t *handle)
+{
+    assert(config->fat_fs.do_not_format && !config->fat_fs.config.format_if_mount_failed);
+    *handle=(void *)1; mount_to(config->mount_point); return ESP_OK;
+}
+esp_err_t tinyusb_msc_set_storage_mount_point(tinyusb_msc_storage_handle_t storage,tinyusb_msc_mount_point_t point) { (void)storage; mount_to(point); return ESP_OK; }
+esp_err_t tinyusb_msc_get_storage_mount_point(tinyusb_msc_storage_handle_t storage,tinyusb_msc_mount_point_t *point) { (void)storage; *point=mount_point; return ESP_OK; }
+
+int original_main(int argc,char **argv)
+{
+    assert(argc==2); scenario=argv[1];
+    assert(usb_storage_start_app()==ESP_OK && usb_storage_app_owned());
+    assert(!tud_msc_is_writable_cb(0) && "Application-owned card must reject host writes");
+    esp_err_t exposed=usb_storage_expose();
+    if(!strcmp(scenario,"enumeration_timeout")) {
+        assert(exposed==ESP_ERR_TIMEOUT && !usb_storage_app_owned());
+        assert(!tud_msc_is_writable_cb(0) && "Failed USB handoff must reject writes");
+        assert(usb_storage_acquire()==ESP_ERR_INVALID_STATE);
+        assert(now==5000 && !usb_storage_host_configured());
+        scenario="enumerated";
+        assert(usb_storage_restore_usb()==ESP_OK && uninstalls==1);
+        assert(usb_storage_host_configured());
+    } else {
+        assert(exposed==ESP_OK && !usb_storage_app_owned());
+        assert(tud_msc_is_writable_cb(0));
+        if(!strcmp(scenario,"enumerated")) {
+            assert(enum_waits>0 && configured && "Expose returned before host configuration");
+            assert(usb_storage_host_configured());
+        } else {
+            assert(now==5000 && !usb_storage_host_configured());
+            if(!strcmp(scenario,"late_host")) {
+                connected=true;
+                event(TINYUSB_EVENT_ATTACHED);
+                assert(usb_storage_host_configured());
+                connected=false;
+                event(TINYUSB_EVENT_DETACHED);
+                assert(!usb_storage_host_configured());
+            }
+        }
+        if(!strcmp(scenario,"timeout") || !strcmp(scenario,"late_quiescence") || !strcmp(scenario,"late_ack")) permit_callback=false;
+        esp_err_t acquired=usb_storage_acquire();
+        if(!permit_callback) {
+            assert(acquired==ESP_ERR_TIMEOUT && !usb_storage_app_owned() && uninstalls==0);
+            if(!strcmp(scenario,"late_quiescence")) permit_callback=true;
+            if(!strcmp(scenario,"late_ack")) { dispatch_pending(); permit_callback=true; }
+            esp_err_t recovered=usb_storage_restore_usb();
+            if(permit_callback) assert(recovered==ESP_OK && !usb_storage_app_owned());
+            else {
+                assert(recovered==ESP_ERR_TIMEOUT && uninstalls==0 && !app);
+                assert(usb_storage_restore_usb()==ESP_ERR_INVALID_STATE);
+            }
+        } else {
+            assert(acquired==ESP_OK && usb_storage_app_owned() && uninstalls==1);
+            assert(!tud_msc_is_writable_cb(0));
+            assert(parked && !read_lock);
+            assert(usb_storage_expose()==ESP_OK);
+            assert(tud_msc_is_writable_cb(0));
+            assert(usb_storage_acquire()==ESP_OK && uninstalls==2);
+        }
+    }
+    printf("Storage lifecycle %s passed\n",argv[1]);
+    return 0;
+}
+
+int main(int argc,char **argv) {
+ assert(argc==2);scenario="quiescence";assert(usb_storage_start_app()==ESP_OK);assert(usb_storage_expose()==ESP_OK);
+ if(!strcmp(argv[1],"drop_on_detach")) {
+  usbd_defer_func(host_write_event,NULL,false);esp_err_t acquired=usb_storage_acquire();
+  printf("acquire=%d app_owned=%d accepted_bytes=%d SD_writes=%d pending_dependency_writes=%u queue_count=%d\n",acquired,usb_storage_app_owned(),accepted_bytes,physical_writes,qa_storage.deffered_writes,queue_count);
+  assert(acquired==ESP_OK && usb_storage_app_owned());assert(accepted_bytes==512 && physical_writes==0 && qa_storage.deffered_writes==1 && queue_count==0);
+ } else {
+  fail_sd=true;host_write_event(NULL);dispatch_pending();
+  printf("accepted_bytes=%d SD_writes=%d SD_result=ESP_FAIL pending_dependency_writes=%u\n",accepted_bytes,physical_writes,qa_storage.deffered_writes);
+  assert(accepted_bytes==512 && physical_writes==1 && qa_storage.deffered_writes==0);
+ } return 0;
+}

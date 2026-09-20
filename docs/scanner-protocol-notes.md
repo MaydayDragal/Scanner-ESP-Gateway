@@ -161,3 +161,9 @@ The display footer still contained a literal `600 DPI | RGB | JPG 50` after the 
 ## Remove the SD status file (2026-09-19)
 
 `GATEWAY.TXT` was diagnostic output only; the firmware never read it. Its writer and boot/scan call sites were removed. After flashing the new firmware on COM3 and resetting, the existing file was deleted from `S:` in File Explorer. A new scan saved `SCAN0014.JPG` (847,210 bytes), fully decoded at 1680 x 2528 RGB, 300 dpi, quality 75, with a 9/19/2026 12:05:02 AM file timestamp. `GATEWAY.TXT` remained absent after the scan.
+
+## Idle display and LED timeout (2026-09-19)
+
+The ESP now turns off the display backlight and panel and clears the status LED after five minutes without a page or scanner-status change. It continues polling the feeder and serving the USB drive. A new page or status update wakes the panel and LED and redraws the current status. The timer is reset by displayed scan progress and status changes; it does not put the ESP or scanner into deep sleep.
+
+The image flashed on COM3 with verified hashes. After a normal reset, the user confirmed `READY TO SCAN` and a green LED. Following an idle interval, the user confirmed both indicators were off while `S:` remained mounted. Inserting a page woke both indicators. The subsequent storage check found the FAT32 root directory empty apart from Windows' `System Volume Information`; read-only CHKDSK reported errors and about 63 MB in two recoverable files. The USB device later disconnected during a read-only disk image. No repair or further scan has been attempted. The completed JPEG for this wake test has not been verified, and the storage fault requires investigation before this firmware can be considered fully validated.

@@ -12,6 +12,7 @@
 #include "usb_storage.h"
 #include "scanner_display.h"
 #include "scanner_led.h"
+#include "scanner_idle_model.h"
 #include "esp_netif.h"
 #include "esp_event.h"
 
@@ -19,9 +20,12 @@ static const char *TAG = "scanner_gateway";
 static scanner_display_state_t display_state={.phase=SCANNER_DISPLAY_STARTING};
 static char last_filename[32];
 static char display_message[96];
+static scanner_idle_model_t visual_idle;
+#define VISUAL_IDLE_TIMEOUT_US (5LL * 60 * 1000000)
 
 static void show_status(scanner_display_state_t *state)
 {
+    scanner_idle_activity(&visual_idle,esp_timer_get_time());
     scanner_display_show(state);
     scanner_led_show(state);
 }
@@ -67,7 +71,15 @@ void app_main(void)
             ESP_LOGI(TAG,"Feeder: %s",paper==ESCI_PAPER_EMPTY?"empty":paper==ESCI_PAPER_LOADED?"loaded":"unavailable");
             previous=paper;
         }
-        if(!page_trigger_poll(&trigger,paper)) continue;
+        if(!page_trigger_poll(&trigger,paper)) {
+            if(scanner_idle_due(&visual_idle,esp_timer_get_time(),VISUAL_IDLE_TIMEOUT_US,display_state.phase)) {
+                scanner_display_sleep();
+                scanner_led_sleep();
+                scanner_idle_sleep(&visual_idle);
+                ESP_LOGI(TAG,"display and LED asleep after inactivity");
+            }
+            continue;
+        }
         ESP_LOGI(TAG,"Page detected; acquiring storage from USB");
         display_state.phase=SCANNER_DISPLAY_SCANNING;
         display_state.scan_bytes=0;

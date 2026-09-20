@@ -45,3 +45,10 @@ void scanner_led_show(const scanner_display_state_t *state)
         strip=NULL;
     }
 }
+
+void scanner_led_sleep(void)
+{
+    if(!enabled) return;
+    esp_err_t result=led_strip_clear(strip);
+    if(result!=ESP_OK) ESP_LOGE(TAG,"status LED sleep failed: %s",esp_err_to_name(result));
+}

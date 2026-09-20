@@ -45,6 +45,7 @@ static esp_lcd_panel_handle_t panel;
 static SemaphoreHandle_t transfer_done;
 static uint16_t *strip;
 static bool enabled;
+static bool sleeping;
 
 static bool color_done(esp_lcd_panel_io_handle_t io,esp_lcd_panel_io_event_data_t *event,void *context)
 {
@@ -120,7 +121,7 @@ bool scanner_display_start(void)
 {
     esp_lcd_panel_io_handle_t io=NULL;
     bool bus_ready=false;
-    panel=NULL; strip=NULL; transfer_done=NULL; enabled=false;
+    panel=NULL; strip=NULL; transfer_done=NULL; enabled=false; sleeping=false;
     gpio_config_t backlight={.pin_bit_mask=1ULL<<GPIO_NUM_48,.mode=GPIO_MODE_OUTPUT};
     if(!lcd_ok(gpio_config(&backlight),"backlight config")) return false;
     if(!lcd_ok(gpio_set_level(GPIO_NUM_48,0),"backlight off")) return false;
@@ -163,6 +164,9 @@ fail:
 void scanner_display_show(const scanner_display_state_t *state)
 {
     if(!enabled) return;
+    bool waking=sleeping;
+    if(waking && !lcd_ok(esp_lcd_panel_disp_on_off(panel,true),"panel wake")) return;
+    sleeping=false;
     scanner_display_view_t view;
     scanner_display_format(state,&view);
     for(int y=0;y<LCD_HEIGHT;y+=STRIP_HEIGHT) {
@@ -173,4 +177,13 @@ void scanner_display_show(const scanner_display_state_t *state)
             ESP_LOGE(TAG,"display transfer timed out"); enabled=false; return;
         }
     }
+    if(waking) lcd_ok(gpio_set_level(GPIO_NUM_48,1),"backlight wake");
+}
+
+void scanner_display_sleep(void)
+{
+    if(!enabled || sleeping) return;
+    if(!lcd_ok(gpio_set_level(GPIO_NUM_48,0),"backlight sleep")) return;
+    if(!lcd_ok(esp_lcd_panel_disp_on_off(panel,false),"panel sleep")) return;
+    sleeping=true;
 }
