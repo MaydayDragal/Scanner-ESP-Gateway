@@ -43,7 +43,7 @@
 - The first settings release supports verified 300/600 dpi and quality 50/75 combinations, with the current 300/75 profile selected by default.
 - PDF generation, preview, and firmware updating follow the reliability release. OCR and cloud/PC services are not part of these releases.
 
-These are planning recommendations. This task creates documents only; no firmware implementation or flashing is implied by the plan's existence.
+Execution began on September 20, 2026, after the user instructed the agent to begin. Reliability work is isolated on `reliability/qa-2026-09-20`; the original checkout is preserved. The [acceptance record](../../qa/reliability-acceptance.md) tracks implementation evidence and the hardware gates. Performance and feature work remain dependent on R10 acceptance.
 
 ## Dependency order
 
@@ -108,7 +108,7 @@ R2/R3 and the combined R4/R5 unit can be developed independently against frozen 
 
 ## Execution and checkpoint policy
 
-- [ ] Preserve the current uncommitted idle-timeout code, QA report, and reproductions as a reviewed baseline commit or explicit patch before starting a feature branch. Do not reset/stash away user changes or publish credentials.
+- [x] Preserve the current uncommitted idle-timeout code, QA report, and reproductions as a reviewed baseline commit or explicit patch before starting a feature branch. Do not reset/stash away user changes or publish credentials. Baseline: `1748997` in the isolated reliability worktree.
 - [ ] Implement one independently testable task per commit; add its regression first, observe the expected failure, then implement and rerun the relevant tests.
 - [ ] Record host-test and fresh-build output for each release. Record firmware hash, configuration, board/card identity, scan sizes/timings, and hardware results without copying private scans into the repository.
 - [ ] Flash only release candidates that pass their software gate. Physical BOOT/RESET actions and controlled fault tests are requested when the corresponding candidate is ready.

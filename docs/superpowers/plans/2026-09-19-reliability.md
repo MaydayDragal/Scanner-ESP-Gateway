@@ -10,6 +10,8 @@
 
 **Spec:** [Design brief](../specs/2026-09-19-qa-improvements-design.md). [Master plan](2026-09-19-qa-improvements.md).
 
+**Execution:** Began September 20, 2026, on `reliability/qa-2026-09-20`. See the [acceptance record](../../qa/reliability-acceptance.md) for current source/test evidence, deviations and remaining physical gates. Quality-75 calibration is deliberately deferred to a known scanner sample at R10.
+
 ## Global constraints
 
 - Target the existing Waveshare ESP32-S3-LCD-1.47 and Epson ES-60W; verify the physical board revision before enabling new pins or PSRAM.
@@ -51,8 +53,8 @@ Each implementation task ends with a focused commit containing source, tests, an
 
 **Interfaces:** `verify_scan.py` accepts an optional `--quality`. Explicit quality verification requires a registered, verified quantization-table set; absent evidence is a nonzero `quality unverified` result. Omitted quality performs decode/dimension inspection and labels quality unverified.
 
-- [ ] Preserve the existing dirty baseline, audit evidence, and idle-timeout work. Record current passing commands and locked dependency versions; use an isolated execution branch without losing those changes.
-- [ ] Add negative quality tests and run them red. Store only table arrays/provenance, never private scan images. Example assertions:
+- [x] Preserve the existing dirty baseline, audit evidence, and idle-timeout work. Record current passing commands and locked dependency versions; use an isolated execution branch without losing those changes.
+- [x] Add negative quality tests and run them red. Store only table arrays/provenance, never private scan images. Example assertions:
 
 ```python
 # Extend the existing unittest fixture/subprocess pattern.
@@ -62,8 +64,8 @@ self.assertNotEqual(verify(bad_dimensions, python_optimized=True).returncode, 0)
 ```
 
 Define the test-local `verify(path, expected_quality=None, python_optimized=False)` wrapper to run `tests/verify_scan.py` with `subprocess.run(..., capture_output=True)`. Use explicit exceptions/exits in the verifier; validation cannot depend on Python assertions.
-- [ ] Compile the width-test DLL in `TemporaryDirectory`, pin the working Python test package versions, and prove the full host runner works with no pre-existing `build` directory in a temporary copy of tracked inputs.
-- [ ] Add CI jobs for host tests and a fresh IDF build with dummy scanner/time credentials created only inside the job. Do not upload firmware artifacts containing real credentials. Keep the normal command stable:
+- [x] Compile the width-test DLL in `TemporaryDirectory`, pin the working Python test package versions, and prove the full host runner works with no pre-existing `build` directory in a temporary copy of tracked inputs.
+- [x] Add CI jobs for host tests and a fresh IDF build with dummy scanner/time credentials created only inside the job. Do not upload firmware artifacts containing real credentials. Keep the normal command stable:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/run_protocol_tests.ps1
@@ -78,7 +80,7 @@ eim run 'idf.py -B build/reliability-clean -D SDKCONFIG=build/reliability-clean/
 
 **Contract:** `tud_msc_write10_cb` returns accepted bytes only after the physical write succeeds. A failed physical write returns `TUD_MSC_RET_ERROR` and records a bounded local error. The host may receive generic sense from the pinned TinyUSB core; failed command status is mandatory.
 
-- [ ] Make dependency resolution explicit with the following mapping in `main/idf_component.yml`; the override path is relative to that manifest. Keep TinyUSB exactly `0.21.0~2`. Verify the clean-build resolved source path points to the checked-in component. Document upstream hashes and every patch.
+- [x] Make dependency resolution explicit with the following mapping in `main/idf_component.yml`; the override path is relative to that manifest. Keep TinyUSB exactly `0.21.0~2`. Verify the clean-build resolved source path points to the checked-in component. Document upstream hashes and every patch.
 
 ```yaml
 dependencies:
@@ -88,7 +90,7 @@ dependencies:
   espressif/tinyusb: "==0.21.0~2"
 # Preserve the manifest's other existing dependencies.
 ```
-- [ ] Port the existing QA FIFO reproduction into production-controller regression cases. Compile the changed production callback as well as the actual controller. The intended assertions are:
+- [x] Port the existing QA FIFO reproduction into production-controller regression cases. Compile the changed production callback as well as the actual controller. The intended assertions are:
 
 ```c
 /* In the extended lifecycle harness, after completion-before-detach. */
@@ -101,7 +103,7 @@ assert(local_write_error != ESP_OK);
 ```
 
 Run `python tests/run_usb_storage_tests.py`; verify new cases fail on the baseline.
-- [ ] Replace the dependency's copied-buffer/deferred-write path with its existing synchronous sector-write function:
+- [x] Replace the dependency's copied-buffer/deferred-write path with its existing synchronous sector-write function:
 
 ```c
 esp_err_t err = msc_storage_write_sector(lun, lba, offset, bufsize, buffer);
@@ -113,8 +115,8 @@ return (int32_t)bufsize;
 ```
 
 Remove unused deferred-write state and update related lifetime checks/tests. Keep buffer size unchanged for this release. Extend the component event API with an I/O-error event carrying LUN, operation, and `esp_err_t`; update `storage_event()` to switch explicitly on event type, so error/eject events cannot satisfy a mount wait.
-- [ ] Test single/multiple sectors, physical timeout, error reporting through actual MSC command processing, detach while a callback is executing, late acknowledgements, and recovery. Preserve refusal to force-delete a task whose safe boundary has not been acknowledged.
-- [ ] Run storage tests, full host tests, and a fresh build. Commit `fix: complete MSC writes before acknowledgement and detach`.
+- [x] Test single/multiple sectors, physical timeout, error reporting through actual MSC command processing, detach while a callback is executing, late acknowledgements, and recovery. Preserve refusal to force-delete a task whose safe boundary has not been acknowledged.
+- [x] Run storage tests, full host tests, and a fresh build. Commit `fix: complete MSC writes before acknowledgement and detach`.
 
 ## R3 — Safe USB modes, explicit eject, and recoverable startup
 
@@ -132,14 +134,14 @@ esp_err_t usb_storage_resume_automatic(void);
 /* No API grants APP access from an uncertain ownership state. */
 ```
 
-- [ ] Add red tests for writes in automatic mode, paper while in maintenance, read-only recovery, and resume before release. Add accepted/rejected/prevented eject, status-completion failure, repeated eject, USB reset, and stale-session events.
-- [ ] Default to `STORAGE_AUTO_RO`; advertise write protection consistently and reject writes. Enter maintenance only from healthy idle; re-enumerate to publish changed protection. Suppress page triggering while writable.
-- [ ] Add an accepted-eject latch in the pinned component's `tud_msc_start_stop_cb`; require `load_eject && !start` and removal permitted. Complete release only after matching `tud_msc_scsi_complete_cb` in the same USB-session generation. That callback also occurs after failed commands, so CDB equality alone is insufficient. Clear latches on reset/reconnect/error; reject new reads/writes after accepted eject. Handle the dedicated PREVENT/ALLOW callback.
-- [ ] Detect every USB bus reset through the pinned stack's `tud_event_hook_cb()`; ATTACHED/DETACHED or `tud_umount_cb()` alone are insufficient. Invalidate session evidence with ISR-safe generation handling, without blocking, rendering, or mounting in the hook. Test a bus reset between accepted eject and completion.
-- [ ] Handle and test `SYNCHRONIZE CACHE(10)` in maintenance mode as a barrier for completed physical I/O. It cannot authorize APP access, substitute for eject, or conceal a latched write failure. Verify this command alongside the Windows eject sequence.
-- [ ] Add minimal runtime BOOT input: GPIO0 input only, 30 ms debounce, require release after boot, and enqueue events. A gesture starting asleep wakes and consumes the entire gesture; it cannot also select maintenance/resume. When already awake, a two-second hold while idle selects maintenance; a hold after completed host eject requests automatic mode. Before eject, show `EJECT DRIVE ON PC`. A press must never force ownership. Later F2 replaces these minimal controls with a menu and retains wake-only gesture consumption.
-- [ ] Initialize the medium/MSC storage object in `MOUNT_USB` with transport stopped; attempt APP mount separately. Patch mount setters to return errors and not falsely overwrite ownership. On filesystem mount failure, clean residual registration with USB stopped and expose only read-only recovery, if the medium itself works. Missing card/unsafe transport remains stopped. Keep automatic formatting disabled.
-- [ ] Pin invariants in tests and run `python tests/run_usb_storage_tests.py` plus the full runner:
+- [x] Add red tests for writes in automatic mode, paper while in maintenance, read-only recovery, and resume before release. Add accepted/rejected/prevented eject, status-completion failure, repeated eject, USB reset, and stale-session events.
+- [x] Default to `STORAGE_AUTO_RO`; advertise write protection consistently and reject writes. Enter maintenance only from healthy idle; re-enumerate to publish changed protection. Suppress page triggering while writable.
+- [x] Add an accepted-eject latch in the pinned component's `tud_msc_start_stop_cb`; require `load_eject && !start` and removal permitted. Complete release only after matching `tud_msc_scsi_complete_cb` in the same USB-session generation. That callback also occurs after failed commands, so CDB equality alone is insufficient. Clear latches on reset/reconnect/error; reject new reads/writes after accepted eject. Handle the dedicated PREVENT/ALLOW callback.
+- [x] Detect every USB bus reset through the pinned stack's `tud_event_hook_cb()`; ATTACHED/DETACHED or `tud_umount_cb()` alone are insufficient. Invalidate session evidence with ISR-safe generation handling, without blocking, rendering, or mounting in the hook. Test a bus reset between accepted eject and completion.
+- [x] Handle and test `SYNCHRONIZE CACHE(10)` in maintenance mode as a barrier for completed physical I/O. It cannot authorize APP access, substitute for eject, or conceal a latched write failure. The actual-core host tests pass; verify this command alongside the real Windows eject sequence at R10 (pending).
+- [x] Add minimal runtime BOOT input: GPIO0 input only, 30 ms debounce, require release after boot, and enqueue events. A gesture starting asleep wakes and consumes the entire gesture; it cannot also select maintenance/resume. When already awake, a two-second hold while idle selects maintenance; a hold after completed host eject requests automatic mode. Before eject, show `EJECT DRIVE ON PC`. A press must never force ownership. Later F2 replaces these minimal controls with a menu and retains wake-only gesture consumption.
+- [x] Initialize the medium/MSC storage object in `MOUNT_USB` with transport stopped; attempt APP mount separately. Patch mount setters to return errors and not falsely overwrite ownership. On filesystem mount failure, clean residual registration with USB stopped and expose only read-only recovery, if the medium itself works. Missing card/unsafe transport remains stopped. Keep automatic formatting disabled.
+- [x] Pin invariants in tests and run `python tests/run_usb_storage_tests.py` plus the full runner:
 
 ```c
 assert(!automatic_write_allowed);
@@ -171,9 +173,9 @@ scanner_crop_outcome_t crop_outcome;
 
 `scan_files.c` owns reservations and tracks which scratch files this attempt created. Capture orchestrates the transaction; JPEG writers accept already-open `FILE *` targets and cannot unlink paths.
 
-- [ ] Add collision/failure tests. A number is available only when `SCANnnnn.JPG`, `SCANnnnn.TMP`, legacy `SCANnnnn.CRP`, `CROPnnnn.JPG`, and `CROPnnnn.TMP` are absent. Treat lookup errors other than not-found as errors. Run `python tests/run_capture_tests.py` red.
-- [ ] Exclusively create scratch files; never create empty final JPG placeholders. Implement publication through a no-replacement adapter verified against the installed FatFs behavior. All calls require APP ownership. Only current-attempt scratch files may be removed; preserve partial originals for inspection.
-- [ ] Publish in this order, using the validator contract in R5:
+- [x] Add collision/failure tests. A number is available only when `SCANnnnn.JPG`, `SCANnnnn.TMP`, legacy `SCANnnnn.CRP`, `CROPnnnn.JPG`, and `CROPnnnn.TMP` are absent. Treat lookup errors other than not-found as errors. Run `python tests/run_capture_tests.py` red.
+- [x] Exclusively create scratch files; never create empty final JPG placeholders. Implement publication through a no-replacement adapter verified against the installed FatFs behavior. All calls require APP ownership. Only current-attempt scratch files may be removed; preserve partial originals for inspection.
+- [x] Publish in this order, using the validator contract in R5:
 
 ```text
 receive SCANnnnn.TMP -> flush/sync/close -> validate every row
@@ -181,8 +183,8 @@ receive SCANnnnn.TMP -> flush/sync/close -> validate every row
 -> optional CROPnnnn.TMP -> write/sync/close -> publish CROPnnnn.JPG
 ```
 
-- [ ] Inject open/connect/short-write/flush/fsync/close/rename failures and a stop at every arrow. Original publication must precede derivative work. If derivative creation fails, set `file_saved=true`, `crop_outcome=SCANNER_CROP_FAILED`; keep the original. Obtain saved sizes from the published files rather than received bytes.
-- [ ] Assert no-crop never touches an existing `.CRP`, final collisions never overwrite, and derivative failures never delete the original. Complete R5 before running the joint capture/image/full-test and build gate; include these changes in the shared R4/R5 commit.
+- [x] Inject open/connect/short-write/flush/fsync/close/rename failures and a stop at every arrow. Original publication must precede derivative work. If derivative creation fails, set `file_saved=true`, `crop_outcome=SCANNER_CROP_FAILED`; keep the original. Obtain saved sizes from the published files rather than received bytes.
+- [x] Assert no-crop never touches an existing `.CRP`, final collisions never overwrite, and derivative failures never delete the original. Complete R5 before running the joint capture/image/full-test and build gate; include these changes in the shared R4/R5 commit.
 
 ## R5 — Validate all JPEG rows and make cropping recoverable
 
@@ -198,12 +200,12 @@ jpeg_status_t jpeg_write_width_crop(FILE *source, FILE *target,
                                     const jpeg_info_t *info, uint16_t width);
 ```
 
-- [ ] Convert the synthetic QA fixtures into correct-behavior tests: the dark-page item remains in the original; empty unsampled row is rejected; no-crop cannot delete another file. Add malformed tables, category/run overflow, stuffing/padding errors, truncated amplitudes, extra entropy, bad restart order, and trailing data. Run `python tests/test_jpeg_pipeline.py` red.
-- [ ] Implement bounded streaming inspection: 4 KiB reader, bounded tables, exact expected MCU count in every row, strict terminal EOI, valid all-one pad bits, and no trailing entropy/data. Parse header segments incrementally, keeping offsets instead of a fixed 64 KiB header. Avoid allocation sized to an entire compressed row. Test an explicit JPEG workspace ceiling of 32 KiB, excluding separately budgeted filesystem/task resources.
-- [ ] In `JPEG_SCANNER_INPUT` mode, permit only the documented oversized scanner height declaration, deriving the permitted entropy-row count and validated height from the checked page-end value and existing justified tolerance. In `JPEG_PUBLISHED` mode, require exact final frame dimensions and the corresponding encoded MCU count. Supply the derivative's actual width for its reinspection. Test scanner input, normalized original, and narrower derivative separately; reject wrong dimensions in each mode. Do not reject normal scanner input merely because its initial height metadata needs correction.
-- [ ] Collect optional crop statistics during inspection; a null proposal disables statistics, never validation. Retain the justified page-end tolerance separately from bitstream checks. Normalize height only after the complete source validates, preserving encoded rows and coefficients.
-- [ ] Default to an optional crop derivative with original retention. A no-crop result produces only the original. Keep the existing narrow-width guard until F6 and preserve one MCU margin; do not describe darkness detection as proof of a physical paper edge. Reinspect derived output before publication.
-- [ ] Run the 300/600 dpi, 50/75 quality corpus, maximum dimensions, allocation-failure tests, retained-pixel comparisons, and R4's complete transaction failure matrix. Pillow decode is a compatibility check in addition to strict validation. Run capture/image/full tests and build, then commit R4/R5 together as `fix: validate JPEGs and preserve originals with safe file transactions`.
+- [x] Convert the synthetic QA fixtures into correct-behavior tests: the dark-page item remains in the original; empty unsampled row is rejected; no-crop cannot delete another file. Add malformed tables, category/run overflow, stuffing/padding errors, truncated amplitudes, extra entropy, bad restart order, and trailing data. Run `python tests/test_jpeg_pipeline.py` red.
+- [x] Implement bounded streaming inspection: 4 KiB reader, bounded tables, exact expected MCU count in every row, strict terminal EOI, valid all-one pad bits, and no trailing entropy/data. Parse header segments incrementally, keeping offsets instead of a fixed 64 KiB header. Avoid allocation sized to an entire compressed row. Test an explicit JPEG workspace ceiling of 32 KiB, excluding separately budgeted filesystem/task resources.
+- [x] In `JPEG_SCANNER_INPUT` mode, permit only the documented oversized scanner height declaration, deriving the permitted entropy-row count and validated height from the checked page-end value and existing justified tolerance. In `JPEG_PUBLISHED` mode, require exact final frame dimensions and the corresponding encoded MCU count. Supply the derivative's actual width for its reinspection. Test scanner input, normalized original, and narrower derivative separately; reject wrong dimensions in each mode. Do not reject normal scanner input merely because its initial height metadata needs correction.
+- [x] Collect optional crop statistics during inspection; a null proposal disables statistics, never validation. Retain the justified page-end tolerance separately from bitstream checks. Normalize height only after the complete source validates, preserving encoded rows and coefficients.
+- [x] Default to an optional crop derivative with original retention. A no-crop result produces only the original. Keep the existing narrow-width guard until F6 and preserve one MCU margin; do not describe darkness detection as proof of a physical paper edge. Reinspect derived output before publication.
+- [x] Run the 300/600 dpi, 50/75 quality corpus, maximum dimensions, allocation-failure tests, retained-pixel comparisons, and R4's complete transaction failure matrix. Pillow decode is a compatibility check in addition to strict validation. Run capture/image/full tests and build, then commit R4/R5 together as `fix: validate JPEGs and preserve originals with safe file transactions`.
 
 ## R6 — Persistent outcomes, stopped recovery, and reliable visual sleep
 
@@ -220,11 +222,11 @@ void gateway_state_acknowledge_result(gateway_state_t *);
 void gateway_state_stop(gateway_state_t *, gateway_phase_t, uint32_t error_code);
 ```
 
-- [ ] Migrate the QA actual-main fault harness: empty feeder cannot erase the last failed result; `file_saved && !scan.released` is a warning; acquisition+recovery failure leaves a responsive STOPPED loop and never starts another capture. Run the full host runner red.
-- [ ] Replace storage abort/return paths with that stopped loop. An acknowledgement clears an alert, not storage uncertainty. Only reviewed recovery actions may change storage state. Preserve diagnostics across normal polling and visual sleep; cold-power-loss persistence is not implied.
-- [ ] Add a static 64-entry diagnostic ring, at most 32 bytes per record: monotonic time, phase/event/error code, and two numeric values. Main writes it; callbacks queue bounded events. No SD status file or credentials. Display current stage and retained outcome; distinguish received bytes from published sizes.
-- [ ] Track requested versus confirmed visual state. Attempt backlight-off even after rendering is disabled. Retry failed off transitions at one-second intervals, at most three attempts; record exhaustion. New activity permits a fresh wake attempt. Routine unchanged polls/metrics must not extend the idle timer; active acquisition/capture/finalization never sleeps.
-- [ ] Test DMA timeout with backlight on, partial panel/backlight sleep, LED clear failure, bounded retry, wake failure, retained error after wake, wake-only button gestures, and five-minute normal idle. Run full tests/build. Commit `fix: retain scan outcomes and keep recovery UI responsive`.
+- [x] Migrate the QA actual-main fault harness: empty feeder cannot erase the last failed result; `file_saved && !scan.released` is a warning; acquisition+recovery failure leaves a responsive STOPPED loop and never starts another capture. Run the full host runner red.
+- [x] Replace storage abort/return paths with that stopped loop. An acknowledgement clears an alert, not storage uncertainty. Only reviewed recovery actions may change storage state. Preserve diagnostics across normal polling and visual sleep; cold-power-loss persistence is not implied.
+- [x] Add a static 64-entry diagnostic ring, at most 32 bytes per record: monotonic time, phase/event/error code, and two numeric values. Main writes it; callbacks queue bounded events. No SD status file or credentials. Display current stage and retained outcome; distinguish received bytes from published sizes.
+- [x] Track requested versus confirmed visual state. Attempt backlight-off even after rendering is disabled. Retry failed off transitions at one-second intervals, at most three attempts; record exhaustion. New activity permits a fresh wake attempt. Routine unchanged polls/metrics must not extend the idle timer; active acquisition/capture/finalization never sleeps.
+- [x] Test DMA timeout with backlight on, partial panel/backlight sleep, LED clear failure, bounded retry, wake failure, retained error after wake, wake-only button gestures, and five-minute normal idle using simulated time. Physical idle/wake remains R10 work. Run full tests/build. Commit `fix: retain scan outcomes and keep recovery UI responsive`.
 
 ## R7 — Explicit clock validity
 
@@ -242,45 +244,45 @@ typedef struct {
 scanner_clock_state_t scanner_clock_current(void);
 ```
 
-- [ ] Add red cases for missing time credentials, home AP/DNS/NTP timeout, and successful boot synchronization. An invalid clock must produce `TIME NOT SET` and mark the scan outcome accordingly.
-- [ ] Publish the existing boot sync result into this state; keep the existing bounded boot sequence. Do not infer current time from a saved old timestamp. A sync failure must not invalidate an already-valid running clock.
-- [ ] Keep time/network changes out of capture and unreleased writable sessions. Full manual resync/timezone controls are F3; this task provides the truthful status contract they consume.
-- [ ] Run clock/UI/full tests and build. Commit `fix: expose timestamp validity and synchronization failures`.
+- [x] Add red cases for missing time credentials, home AP/DNS/NTP timeout, and successful boot synchronization. An invalid clock must produce `TIME NOT SET` and mark the scan outcome accordingly.
+- [x] Publish the existing boot sync result into this state; keep the existing bounded boot sequence. Do not infer current time from a saved old timestamp. A sync failure must not invalidate an already-valid running clock.
+- [x] Keep time/network changes out of capture and unreleased writable sessions. Full manual resync/timezone controls are F3; this task provides the truthful status contract they consume.
+- [x] Run clock/UI/full tests and build. Commit `fix: expose timestamp validity and synchronization failures`.
 
 ## R8 — Length-aware scanner status parsing
 
 **Depends on:** R1. **Files:** modify `esci_scan.c` and `tests/test_esci_scan.c`.
 
-- [ ] Add leading/interior/trailing NUL, truncated token, valid-token-plus-junk, and reordered valid paper/battery token cases. Expected malformed result:
+- [x] Add leading/interior/trailing NUL, truncated token, valid-token-plus-junk, and reordered valid paper/battery token cases. Expected malformed result:
 
 ```c
 assert(!status.valid);
 assert(status.paper == ESCI_PAPER_UNKNOWN);
 ```
 
-- [ ] Record the actual received payload length and parse with pointer/end bounds. Reject embedded NUL and incomplete/unrecognized tokens without reading beyond the payload. Preserve valid no-paper, loaded, and low-battery combinations.
-- [ ] Run the full protocol runner, verify the new cases failed before the change and pass afterward, and commit `fix: parse scanner status by payload length`.
+- [x] Record the actual received payload length and parse with pointer/end bounds. Reject embedded NUL and incomplete/unrecognized tokens without reading beyond the payload. Preserve valid no-paper, loaded, and low-battery combinations.
+- [x] Run the full protocol runner, verify the new cases failed before the change and pass afterward, and commit `fix: parse scanner status by payload length`.
 
 ## R9 — Make the legacy host probe non-destructive
 
 **Depends on:** R1. **Files:** modify `tools/probe_es60w.ps1`; create `tests/test_probe_es60w.ps1`; update README legacy-probe instructions.
 
-- [ ] Refactor external adapter/profile/netsh operations behind injectable wrappers and add mock tests for an existing scanner profile, absent profile, two adapters, connect failure, and restoration failure. No test may call real `netsh` or change an adapter.
-- [ ] Require an explicit `-InterfaceAlias`; query and restore that adapter's original connection. Preserve existing profiles instead of deleting them. Create/delete only a uniquely named temporary profile owned by the probe; securely remove its temporary XML in all paths. Preserve primary and restoration errors separately.
-- [ ] Validate the transaction with the mocked runner:
+- [x] Refactor external adapter/profile/netsh operations behind injectable wrappers and add mock tests for an existing scanner profile, absent profile, two adapters, connect failure, and restoration failure. No test may call real `netsh` or change an adapter.
+- [x] Require an explicit `-InterfaceAlias`; query and restore that adapter's original connection. Preserve existing profiles instead of deleting them. Create/delete only a uniquely named temporary profile owned by the probe; securely remove its temporary XML in all paths. Preserve primary and restoration errors separately.
+- [x] Validate the transaction with the mocked runner:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/test_probe_es60w.ps1
 # Expected: pre-existing profiles unchanged; only selected adapter touched.
 ```
 
-- [ ] Parse all PowerShell scripts and commit `fix: preserve network profiles in legacy scanner probe`.
+- [x] Parse all PowerShell scripts and commit `fix: preserve network profiles in legacy scanner probe`.
 
 ## R10 — Reliability release gate
 
 **Depends on:** R1-R9. **Files:** update `README.md`, `docs/scanner-protocol-notes.md`, QA finding status; create `docs/qa/reliability-acceptance.md` with actual results.
 
-- [ ] Run full host tests, clean CI-equivalent build, size check, and source review of ownership/publication/error paths. Require a fitting image before flashing. Keep large feature code out of this release; flash expansion is P2.
+- [x] Run full host tests, clean CI-equivalent build, size check, and source review of ownership/publication/error paths. Require a fitting image before flashing. Keep large feature code out of this release; flash expansion is P2.
 - [ ] Prepare an expendable card and a private backup of any needed card contents through a verified stable reader. The unresolved recovery card is not a test fixture. Record firmware hash and build configuration.
 - [ ] Flash the candidate and verify normal read-only mode, writable maintenance operations and hashes, paper blocked during maintenance, successful Windows safe eject, and explicit resume. Test prevented/rejected/aborted release sequences. Verify no APP mount before release.
 - [ ] Scan a 20-page mixed corpus, including dark right-side content and narrow/full-width sheets, without reset. Verify originals and derivatives, actual byte sizes, timestamps/clock warnings, filenames, and no FAT errors. Exercise 600 dpi and quality 50 through controlled builds until the runtime profiles exist.
