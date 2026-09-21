@@ -24,21 +24,21 @@ with tempfile.TemporaryDirectory(prefix="capture-tests-") as directory:
     # Keep each fixture between 16 and 32 KiB so write-fault ordinals remain
     # one receive chunk, one final receive chunk, then the height update.
     for color in ('white','dark'):
-        image=Image.new('RGB',(5100,192),'white')
+        image=Image.new('RGB',(2550,384),'white')
         if color=='dark':
-            image.paste((8,8,8),(3072,0,5100,192));image.paste('white',(4000,8,4800,16))
-        fixture=work/f'{color}.jpg';image.save(fixture,quality=100,subsampling=1,restart_marker_rows=1)
+            image.paste((8,8,8),(1536,0,2550,384));image.paste('white',(2000,8,2400,16))
+        fixture=work/f'{color}.jpg';image.save(fixture,quality=75,subsampling=1,restart_marker_rows=1)
         clean=fixture.read_bytes();sof=clean.index(b'\xff\xc0')
         assert 16384 < len(clean) <= 32768, 'fixture must span exactly two receive chunks'
-        fixture.write_bytes(clean[:sof+5]+(8400).to_bytes(2,'big')+clean[sof+7:])
+        fixture.write_bytes(clean[:sof+5]+(4200).to_bytes(2,'big')+clean[sof+7:])
         fixtures[color]=(fixture,clean)
     corrupt=work/'invalid.jpg';data=fixtures['white'][0].read_bytes()
     start=data.index(b'\xff\xd0')+2;end=data.index(b'\xff\xd1',start)
     corrupt.write_bytes(data[:start]+data[end:])
     wrong_canvas=work/'wrong-canvas.jpg'
-    Image.new('RGB',(2550,384),'white').save(wrong_canvas,quality=100,subsampling=1,restart_marker_rows=1)
+    Image.new('RGB',(5100,384),'white').save(wrong_canvas,quality=75,subsampling=1,restart_marker_rows=1)
     data=wrong_canvas.read_bytes();sof=data.index(b'\xff\xc0')
-    wrong_canvas.write_bytes(data[:sof+5]+(4200).to_bytes(2,'big')+data[sof+7:])
+    wrong_canvas.write_bytes(data[:sof+5]+(8400).to_bytes(2,'big')+data[sof+7:])
     cases=['success','white','ownership','connect','recv','send','open1','fdopen1','write1','flush1','sync1','close1',
         'fopen1','alloc1','alloc2','write2','write3','flush2','sync2','close2','fopen2','close3','rename1','collision1','stat1','stat6',
         'open2','alloc3','alloc4','corrupt_crop','fdopen2','fopen3','put1','close4','flush3','sync3','close5','fopen4','close6','rename2','collision2','stat7','invalid','wrong_canvas']
@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix="capture-tests-") as directory:
         if original.exists() and case!='collision1':
             assert original.read_bytes()==clean,(case,'original changed or lost content')
             with Image.open(original) as img:
-                img.load();assert img.size==(5100,192)
+                img.load();assert img.size==(2550,384)
         if case in original_failures or case in ('invalid','wrong_canvas'):
             assert not original.exists() or case=='collision1',case
         if case in ('open2','alloc3','alloc4','corrupt_crop','fdopen2','fopen3','put1','close4','flush3','sync3','close5','fopen4','close6','rename2','collision2','stat7','stat6'):

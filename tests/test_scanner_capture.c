@@ -92,7 +92,7 @@ static void fixture(const char *filename) {
     response("CAPA","#nrdNONE#---",strlen(caps));frame(0xa000,caps,strlen(caps));frame(0xa000,NULL,0);
     response("PARA","#parOK  #---",0);response("TRDT","#nrdNONE#---",0);
     response("IMG ","#typIMGA#---",(size_t)n);frame(0xa000,data,(size_t)n);free(data);
-    response("IMG ","#peni0005100i0000192#lftd000#---",0);response("FIN ","#nrdNONE#---",0);
+    response("IMG ","#peni0002550i0000384#lftd000#---",0);response("FIN ","#nrdNONE#---",0);
 }
 int main(int argc,char**argv) {
     assert(argc==3);scenario=argv[1];fixture(argv[2]);

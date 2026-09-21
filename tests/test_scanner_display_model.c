@@ -17,7 +17,7 @@ int main(void)
     scanner_display_format(&state,&view);
     assert(!strcmp(view.connection,"SCANNER RECONNECTING"));
     assert(!strcmp(view.headline,"STARTING GATEWAY"));
-    assert(!strcmp(view.footer,"600 DPI | RGB | JPG 100"));
+    assert(!strcmp(view.footer,"300 DPI | RGB | JPG 75"));
 
     state=(scanner_display_state_t){.wifi_connected=true,.scanner_available=true,.paper=ESCI_PAPER_EMPTY,.phase=SCANNER_DISPLAY_WAITING};
     scanner_display_format(&state,&view);
@@ -76,19 +76,19 @@ int main(void)
     assert(!strcmp(view.detail,"USB STORAGE RESTORE FAILED"));
     assert(view.tone==SCANNER_DISPLAY_TONE_ERROR);
 
-    /* Quality 100 adds a digit: both warning paths must retain the full footer. */
+    /* Both warning paths must retain the full active-settings footer. */
     gateway_state_t gateway={.phase=GATEWAY_READY};
     scanner_clock_state_t clock={.valid=false};
     state=(scanner_display_state_t){.gateway=&gateway,.clock=&clock};
     scanner_display_format(&state,&view);
-    assert(!strcmp(view.footer,"TIME NOT SET|600 DPI RGB JPG100"));
+    assert(!strcmp(view.footer,"TIME NOT SET|300 DPI RGB JPG75"));
     clock.valid=true;
     gateway.last_result.present=true;
     gateway.last_result.clock_valid=false;
     scanner_display_format(&state,&view);
-    assert(!strcmp(view.footer,"TIME NOT SET|600 DPI RGB JPG100"));
+    assert(!strcmp(view.footer,"TIME NOT SET|300 DPI RGB JPG75"));
     gateway.last_result.clock_valid=true;
     scanner_display_format(&state,&view);
-    assert(!strcmp(view.footer,"600 DPI | RGB | JPG 100"));
+    assert(!strcmp(view.footer,"300 DPI | RGB | JPG 75"));
 
 }
