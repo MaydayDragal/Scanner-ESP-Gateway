@@ -134,9 +134,9 @@ int main(void)
     esci_result_t r=esci_scan(&io);
     assert(r.complete && r.released && r.bytes==262144 && saved==262144 && largest_save==16384);
     assert(r.page_width==2550 && r.page_height==3256);
-    assert(output_contains("#JPGd075"));
-    assert(output_contains("#RSMd300#RSSd300"));
-    assert(output_contains("#ACQi0000000i0000000i0002550i0004200"));
+    assert(output_contains("#JPGd100"));
+    assert(output_contains("#RSMd600#RSSd600"));
+    assert(output_contains("#ACQi0000000i0000000i0005100i0008400"));
     assert(cursor==length);
     fixture(false,true); r=esci_scan(&io); assert(!r.complete);
     fixture(true,false); r=esci_scan(&io); assert(!r.complete);
