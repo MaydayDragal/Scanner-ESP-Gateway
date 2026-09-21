@@ -21,12 +21,15 @@ with tempfile.TemporaryDirectory(prefix="capture-tests-") as directory:
     binary=work/"capture.exe"
     subprocess.run([sys.executable,"-m","ziglang","cc",*objects,"-o",str(binary)],check=True)
     fixtures={}
+    # Keep each fixture between 16 and 32 KiB so write-fault ordinals remain
+    # one receive chunk, one final receive chunk, then the height update.
     for color in ('white','dark'):
         image=Image.new('RGB',(2550,384),'white')
         if color=='dark':
             image.paste((8,8,8),(1536,0,2550,384));image.paste('white',(2000,8,2400,16))
         fixture=work/f'{color}.jpg';image.save(fixture,quality=75,subsampling=1,restart_marker_rows=1)
         clean=fixture.read_bytes();sof=clean.index(b'\xff\xc0')
+        assert 16384 < len(clean) <= 32768, 'fixture must span exactly two receive chunks'
         fixture.write_bytes(clean[:sof+5]+(4200).to_bytes(2,'big')+clean[sof+7:])
         fixtures[color]=(fixture,clean)
     corrupt=work/'invalid.jpg';data=fixtures['white'][0].read_bytes()

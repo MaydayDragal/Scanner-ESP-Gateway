@@ -93,7 +93,7 @@ with tempfile.TemporaryDirectory(prefix='jpeg-pipeline-') as directory:
         check(scanner[:start]+scanner[end:],2550,4200,mode=0,pw=2550,ph=384,stats=0,status=1)
         # Scanner declaration, normalized original and derivative each use their own dimensions.
         for canvas in (2550,5100):
-            for quality in (50,75):
+            for quality in (50,75,100):
                 image=Image.new('RGB',(canvas,384),'white')
                 boundary=(canvas*3//5)//16*16
                 image.paste((8,8,8),(boundary,0,canvas,384))
@@ -135,15 +135,15 @@ with tempfile.TemporaryDirectory(prefix='jpeg-pipeline-') as directory:
         target.unlink()
         # Maximum supported frame and noisy, large compressed rows use identical workspace.
         for dimensions in ((2550,4200),(5100,8400)):
-            image=Image.new('RGB',dimensions,'white');image.save(source,quality=75,subsampling=1,restart_marker_rows=1)
+            image=Image.new('RGB',dimensions,'white');image.save(source,quality=100,subsampling=1,restart_marker_rows=1)
             check(source.read_bytes(),*dimensions)
         noisy=Image.effect_noise((5100,64),100).convert('RGB')
-        noisy.save(source,quality=75,subsampling=1,restart_marker_rows=1)
+        noisy.save(source,quality=100,subsampling=1,restart_marker_rows=1)
         check(source.read_bytes(),5100,64)
         dll.jpeg_test_fail_allocation(1);check(base,80,16,status=3);dll.jpeg_test_fail_allocation(0)
         dll.jpeg_workspace_size.restype=ctypes.c_size_t;dll.jpeg_test_peak.restype=ctypes.c_size_t
         workspace=dll.jpeg_workspace_size();assert dll.jpeg_test_peak()==workspace<=32768
-        print(f'JPEG pipeline passed: {len(corrupt)} malformed variants, all-row validation, 300/600 dpi 50/75 corpus, max dimensions, allocation failure; workspace {workspace} bytes')
+        print(f'JPEG pipeline passed: {len(corrupt)} malformed variants, all-row validation, 300/600 dpi 50/75/100 corpus, max dimensions, allocation failure; workspace {workspace} bytes')
     finally:
         if sys.platform=='win32':
             handle=dll._handle

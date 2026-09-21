@@ -75,4 +75,20 @@ int main(void)
     scanner_display_format(&state,&view);
     assert(!strcmp(view.detail,"USB STORAGE RESTORE FAILED"));
     assert(view.tone==SCANNER_DISPLAY_TONE_ERROR);
+
+    /* Both warning paths must retain the full active-settings footer. */
+    gateway_state_t gateway={.phase=GATEWAY_READY};
+    scanner_clock_state_t clock={.valid=false};
+    state=(scanner_display_state_t){.gateway=&gateway,.clock=&clock};
+    scanner_display_format(&state,&view);
+    assert(!strcmp(view.footer,"TIME NOT SET|300 DPI RGB JPG75"));
+    clock.valid=true;
+    gateway.last_result.present=true;
+    gateway.last_result.clock_valid=false;
+    scanner_display_format(&state,&view);
+    assert(!strcmp(view.footer,"TIME NOT SET|300 DPI RGB JPG75"));
+    gateway.last_result.clock_valid=true;
+    scanner_display_format(&state,&view);
+    assert(!strcmp(view.footer,"300 DPI | RGB | JPG 75"));
+
 }

@@ -152,7 +152,7 @@ bool scanner_display_start(void)
     if(!lcd_ok(esp_lcd_panel_init(panel),"panel init")) goto fail;
     if(!lcd_ok(esp_lcd_panel_invert_color(panel,true),"panel inversion")) goto fail;
     if(!lcd_ok(esp_lcd_panel_swap_xy(panel,true),"panel rotation")) goto fail;
-    if(!lcd_ok(esp_lcd_panel_mirror(panel,true,false),"panel mirror")) goto fail;
+    if(!lcd_ok(esp_lcd_panel_mirror(panel,false,true),"panel mirror")) goto fail;
     if(!lcd_ok(esp_lcd_panel_set_gap(panel,0,34),"panel gap")) goto fail;
     if(!lcd_ok(esp_lcd_panel_disp_on_off(panel,true),"panel enable")) goto fail;
     if(!lcd_ok(gpio_set_level(GPIO_NUM_48,1),"backlight on")) goto fail;
